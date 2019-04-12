@@ -84,20 +84,20 @@ std::vector<board::rect> generate_guillotine_set(
 
 int main()
 {
-    unsigned window_height =  1000;
-    sf::RenderWindow window(sf::VideoMode(window_height/2, window_height), "Pack Against The Machine");
+    unsigned window_size = 1920;
+    sf::RenderWindow window(sf::VideoMode(window_size, window_size/2), "Pack Against The Machine");
 
     sf::Font font;
 
     if(!font.loadFromFile("Inconsolata/Inconsolata-Bold.ttf"))
         throw std::runtime_error("Failed to load Inconsolata");
 
-    unsigned w = 8;
-    unsigned h = 8;
+    unsigned w = 32;
+    unsigned h = 32;
 
     board pack_board(w, h);
     board orig_board(w, h);
-    rect_packer packer(w, h, true);
+    rect_packer packer(w, h, false);
     int pack_index = 0;
 
     bool at_once = true;
@@ -112,7 +112,7 @@ int main()
         packer.reset();
         pack_index = 0;
 
-        rects = generate_guillotine_set(w, h, 12);
+        rects = generate_guillotine_set(w, h, w*4);
         shuffle(rects);
         rects_queue.clear();
         for(unsigned i = 0; i < rects.size(); ++i)
@@ -124,7 +124,16 @@ int main()
         }
 
         if(at_once)
+        {
             packer.pack(rects_queue.data(), rects_queue.size(), true);
+            std::sort(
+                rects_queue.begin(),
+                rects_queue.end(),
+                [](const rect_packer::rect& a, const rect_packer::rect& b){
+                    return a.w * a.h > b.w * b.h;
+                }
+            );
+        }
     };
 
     auto step = [&](){
@@ -136,6 +145,8 @@ int main()
             if(at_once)
             {
                 rect_packer::rect p = rects_queue[pack_index];
+                r.w = p.w;
+                r.h = p.h;
                 r.x = p.x;
                 r.y = p.y;
                 rotated = p.rotated;
@@ -170,7 +181,7 @@ int main()
     window.setVerticalSyncEnabled(true);
 
     sf::Time total;
-    sf::Time tick = sf::milliseconds(250);
+    sf::Time tick = sf::milliseconds(50);
     sf::Clock clock;
 
     bool paused = false;
@@ -207,8 +218,8 @@ int main()
 
         window.clear(sf::Color(0x404040FF));
         sf::Vector2u sz = window.getSize();
-        pack_board.draw(window, 10, 10, sz.x-20, sz.y/2-20, true, &font);
-        orig_board.draw(window, 10, sz.y/2+10, sz.x-20, sz.y/2-20, true, &font);
+        pack_board.draw(window, 10, 10, sz.x/2-20, sz.y-20, true, &font);
+        orig_board.draw(window, sz.x/2+10, 10, sz.x/2-20, sz.y-20, true, &font);
 
         if(pack_index >= (int)rects.size())
         {
