@@ -18,12 +18,17 @@
 class rect_packer
 {
 public:
-    rect_packer();
-    rect_packer(int w, int h);
+    rect_packer(int w = 0, int h = 0, bool open = false);
 
     void enlarge(int w, int h);
     void reset(int w, int h);
     void reset();
+
+    // If open, cost approximation is adjusted such that packing after enlarge()
+    // yields better results. Set this to true if you plan to enlarge(). If you
+    // don't use enlarge(), this will cause packing results to be slightly
+    // worse.
+    void set_open(bool open);
 
     // Returns false if this rectangle could not be packed. In that case, use
     // enlarge() to make the canvas larger and retry. If succesful, the
@@ -87,6 +92,7 @@ private:
     // by x.
     std::vector<free_rect> free_space;
     int canvas_w, canvas_h;
+    bool open;
 };
 
 #endif

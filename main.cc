@@ -84,7 +84,8 @@ std::vector<board::rect> generate_guillotine_set(
 
 int main()
 {
-    sf::RenderWindow window(sf::VideoMode(400, 800), "Pack Against The Machine");
+    unsigned window_height =  1000;
+    sf::RenderWindow window(sf::VideoMode(window_height/2, window_height), "Pack Against The Machine");
 
     sf::Font font;
 
@@ -96,7 +97,7 @@ int main()
 
     board pack_board(w, h);
     board orig_board(w, h);
-    rect_packer packer(w, h);
+    rect_packer packer(w, h, true);
     int pack_index = 0;
 
     bool at_once = true;
@@ -204,7 +205,7 @@ int main()
 
         if(pack_index > (int)rects.size() + 10) reset();
 
-        window.clear(sf::Color(0x1C675CFF));
+        window.clear(sf::Color(0x404040FF));
         sf::Vector2u sz = window.getSize();
         pack_board.draw(window, 10, 10, sz.x-20, sz.y/2-20, true, &font);
         orig_board.draw(window, 10, sz.y/2+10, sz.x-20, sz.y/2-20, true, &font);

@@ -9,9 +9,8 @@ namespace
     }
 }
 
-rect_packer::rect_packer(): canvas_w(0), canvas_h(0) {}
-
-rect_packer::rect_packer(int w, int h)
+rect_packer::rect_packer(int w, int h, bool open)
+: open(open)
 {
     reset(w, h);
 }
@@ -75,6 +74,11 @@ void rect_packer::reset()
 {
     free_space.clear();
     free_space.push_back({{}, {}, 0, 0, canvas_w, canvas_h});
+}
+
+void rect_packer::set_open(bool open)
+{
+    this->open = open;
 }
 
 bool rect_packer::pack(int w, int h, int& x, int& y)
@@ -392,15 +396,18 @@ int rect_packer::calculate_cost(
     for(free_rect* r: path)
     {
         int overlap = calc_overlap(x, w, r->x, r->w);
+        bool top_open = (y + h == canvas_h) && open;
+
         // No top contact
-        if(r->y + r->h > y + h) exposed += overlap;
+        if(r->y + r->h > y + h || top_open) exposed += overlap;
 
         // No bottom contact
         if(r->y < y) exposed += overlap;
     }
 
+    bool right_open = (x + w == canvas_w) && open;
     // Right edge
-    if(right->x + right->w == x + w)
+    if(right->x + right->w == x + w && !right_open)
     {
         for(free_rect* r: right->right)
             exposed += calc_overlap(y, h, r->y, r->h);
