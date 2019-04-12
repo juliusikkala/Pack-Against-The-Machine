@@ -114,17 +114,13 @@ int main()
 
         rects = generate_guillotine_set(w, h, w*4);
         shuffle(rects);
-        rects_queue.clear();
-        for(unsigned i = 0; i < rects.size(); ++i)
-        {
-            rects[i].id = i;
-            orig_board.place(rects[i]);
-
-            if(at_once) rects_queue.push_back({rects[i].w, rects[i].h});
-        }
 
         if(at_once)
         {
+            rects_queue.clear();
+            for(unsigned i = 0; i < rects.size(); ++i)
+                rects_queue.push_back({rects[i].w, rects[i].h});
+
             packer.pack(rects_queue.data(), rects_queue.size(), true);
             std::sort(
                 rects_queue.begin(),
@@ -140,8 +136,12 @@ int main()
                     return a.w * a.h > b.w * b.h;
                 }
             );
-            for(unsigned i = 0; i < rects.size(); ++i)
-                rects[i].id = i;
+        }
+
+        for(unsigned i = 0; i < rects.size(); ++i)
+        {
+            rects[i].id = i;
+            orig_board.place(rects[i]);
         }
     };
 
@@ -229,6 +229,8 @@ int main()
         sf::Vector2u sz = window.getSize();
         pack_board.draw(window, 10, 10, sz.x/2-20, sz.y-20, true, &font);
         orig_board.draw(window, sz.x/2+10, 10, sz.x/2-20, sz.y-20, true, &font);
+        //pack_board.draw(window, 10, 10, sz.x/2-20, sz.y-20, false, nullptr);
+        //orig_board.draw(window, sz.x/2+10, 10, sz.x/2-20, sz.y-20, false, nullptr);
 
         if(pack_index >= (int)rects.size())
         {

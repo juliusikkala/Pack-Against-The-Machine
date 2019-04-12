@@ -137,7 +137,8 @@ void board::draw(
     }
 
     // Draw rects
-    float outline_thickness = std::max(w/(float)width*0.2f, 1.0f);
+    float outline_thickness = w/(float)width*0.2f;
+    if(outline_thickness < 1.0f) outline_thickness = 0.0f;
     float font_size = std::max(w/(float)width*0.5f, 8.0f);
     for(const rect& r: rects)
     {
