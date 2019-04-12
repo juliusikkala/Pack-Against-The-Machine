@@ -106,12 +106,12 @@ bool rect_packer::pack_rotate(int w, int h, int& x, int& y, bool& rotated)
     int rot_cost = find_min_cost(rot_x, rot_y, h, w, rot_path);
 
     // Pick cheaper orientation, preferring non-rotated version.
-    if(cost != -1 && cost <= rot_cost)
+    if(cost != -1 && (cost <= rot_cost || rot_cost == -1))
     {
         rotated = false;
         place(x, y, w, h, path);
     }
-    else if(rot_cost != -1 && cost > rot_cost)
+    else if(rot_cost != -1 && (cost > rot_cost || cost == -1))
     {
         rotated = true;
         x = rot_x;
@@ -357,7 +357,7 @@ int rect_packer::find_min_cost(
         // No vertical fit
         if(h > r.h) continue;
 
-        bool easy_fit = w <= r.w;
+        bool easy_fit = w < r.w;
 
         // Left edge
         if(!r.right.empty() || r.left.empty())
