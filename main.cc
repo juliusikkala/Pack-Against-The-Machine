@@ -92,15 +92,17 @@ int main()
     if(!font.loadFromFile("Inconsolata/Inconsolata-Bold.ttf"))
         throw std::runtime_error("Failed to load Inconsolata");
 
-    unsigned w = 32;
-    unsigned h = 32;
+    unsigned w = 2048;
+    unsigned h = 2048;
+    int splits = w * 4;
+    bool at_once = false;
+    bool allow_rotate = true;
 
     board pack_board(w, h);
     board orig_board(w, h);
-    rect_packer packer(w, h, false);
+    rect_packer packer(w, h, true);
     int pack_index = 0;
-
-    bool at_once = true;
+    int packed = 0;
 
     std::vector<board::rect> rects;
     std::vector<rect_packer::rect> rects_queue;
@@ -111,8 +113,9 @@ int main()
         orig_board.reset();
         packer.reset();
         pack_index = 0;
+        packed = 0;
 
-        rects = generate_guillotine_set(w, h, w*4);
+        rects = generate_guillotine_set(w, h, splits);
         shuffle(rects);
 
         if(at_once)
@@ -121,7 +124,8 @@ int main()
             for(unsigned i = 0; i < rects.size(); ++i)
                 rects_queue.push_back({rects[i].w, rects[i].h});
 
-            packer.pack(rects_queue.data(), rects_queue.size(), true);
+            printf("Generating at-once solution!\n");
+            packer.pack(rects_queue.data(), rects_queue.size(), allow_rotate);
             std::sort(
                 rects_queue.begin(),
                 rects_queue.end(),
@@ -163,9 +167,11 @@ int main()
             }
             else
             {
-                success = packer.pack_rotate(r.w, r.h, r.x, r.y, rotated);
-                //success = packer.pack(r.w, r.h, r.x, r.y);
+                success = allow_rotate ? 
+                    packer.pack_rotate(r.w, r.h, r.x, r.y, rotated):
+                    packer.pack(r.w, r.h, r.x, r.y);
             }
+
             if(success)
             {
                 if(rotated)
@@ -175,11 +181,7 @@ int main()
                     r.h = tmp;
                 }
                 pack_board.place(r);
-                printf("Packed %d\n", pack_index);
-            }
-            else
-            {
-                printf("Pack failed for %d\n", pack_index);
+                packed++;
             }
         }
         pack_index++;
@@ -190,7 +192,7 @@ int main()
     window.setVerticalSyncEnabled(true);
 
     sf::Time total;
-    sf::Time tick = sf::milliseconds(50);
+    sf::Time tick = sf::milliseconds(std::max(5000/splits,1));
     sf::Clock clock;
 
     bool paused = false;
@@ -217,24 +219,37 @@ int main()
         }
 
         if(!paused) total += clock.restart();
-        while(total > tick)
+        if(pack_index < (int)rects.size())
         {
-            total -= tick;
-            step();
+            while(total > tick)
+            {
+                total -= tick;
+                step();
+            }
+            clock.restart();
         }
-
-        if(pack_index > (int)rects.size() + 10) reset();
+        else if(total > sf::milliseconds(4000))
+        {
+            reset();
+            total = sf::milliseconds(0);
+            clock.restart();
+        }
 
         window.clear(sf::Color(0x404040FF));
         sf::Vector2u sz = window.getSize();
-        pack_board.draw(window, 10, 10, sz.x/2-20, sz.y-20, true, &font);
-        orig_board.draw(window, sz.x/2+10, 10, sz.x/2-20, sz.y-20, true, &font);
-        //pack_board.draw(window, 10, 10, sz.x/2-20, sz.y-20, false, nullptr);
-        //orig_board.draw(window, sz.x/2+10, 10, sz.x/2-20, sz.y-20, false, nullptr);
+        //pack_board.draw(window, 10, 10, sz.x/2-20, sz.y-20, true, &font);
+        //orig_board.draw(window, sz.x/2+10, 10, sz.x/2-20, sz.y-20, true, &font);
+        pack_board.draw(window, 10, 10, sz.x/2-20, sz.y-20, false, nullptr);
+        orig_board.draw(window, sz.x/2+10, 10, sz.x/2-20, sz.y-20, false, nullptr);
 
         if(pack_index >= (int)rects.size())
         {
-            sf::Text finished("Finished", font, 32);
+            sf::Text finished(
+                "Rectangles: " +
+                std::to_string(100.0*packed/(double)rects.size()) +
+                "%\nArea: " + std::to_string(100.0*pack_board.coverage()) + "%",
+                font, 32
+            );
             finished.setOutlineColor(sf::Color::Black);
             finished.setFillColor(sf::Color::White);
             finished.setOutlineThickness(3);

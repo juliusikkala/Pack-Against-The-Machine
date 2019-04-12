@@ -20,6 +20,7 @@ public:
 
     void place(const rect& r);
     bool can_place(const rect& r) const;
+    double coverage() const;
 
     void draw(
         sf::RenderWindow& win,
@@ -30,6 +31,7 @@ public:
     ) const;
 private:
     int width, height;
+    int covered;
     std::vector<rect> rects;
 };
 

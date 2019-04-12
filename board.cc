@@ -55,7 +55,7 @@ unsigned generate_color(int id, bool bounds)
 }
 
 board::board(int w, int h)
-: width(w), height(h)
+: width(w), height(h), covered(0)
 {
 }
 
@@ -68,11 +68,13 @@ void board::resize(int w, int h)
 void board::reset()
 {
     rects.clear();
+    covered = 0;
 }
 
 void board::place(const rect& r)
 {
     rects.push_back(r);
+    covered += r.w * r.h;
 }
 
 bool board::can_place(const rect& r) const
@@ -87,6 +89,11 @@ bool board::can_place(const rect& r) const
         if(rect_overlap(o, r)) return false;
     }
     return true;
+}
+
+double board::coverage() const
+{
+    return covered/(double)(width * height);
 }
 
 void board::draw(
@@ -138,7 +145,7 @@ void board::draw(
 
     // Draw rects
     float outline_thickness = w/(float)width*0.2f;
-    if(outline_thickness < 1.0f) outline_thickness = 0.0f;
+    if(outline_thickness < 3.0f) outline_thickness = 0.0f;
     float font_size = std::max(w/(float)width*0.5f, 8.0f);
     for(const rect& r: rects)
     {
