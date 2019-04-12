@@ -8,6 +8,13 @@
 //
 // Please use stb_rect_pack instead if you don't need resizing or one-by-one
 // packing. It's likely much better when packing multiple rectangles at once.
+//
+// This algorithm works by finding such a placing for the rectangle that it's
+// edges are minimally exposed to the area left free. In other words, it
+// maximizes contact surface area with previously allocated space. This packing
+// algorithm is quite intuitive; I designed it based on what I would do if I was
+// asked to pack arbitrary rectangles in a limited-size bin without knowledge
+// of future rectangles.
 class rect_packer
 {
 public:
@@ -24,6 +31,33 @@ public:
     // (that corner typically means the top-left corner in rasterizing 2D apps,
     // but this class doesn't actually care about coordinate directions)
     bool push(int w, int h, int& x, int& y);
+
+    // push(), but allows 90 degree rotation of the input rectangle. rotated is
+    // set to true if that happened.
+    bool push_rotate(int w, int h, int& x, int& y, bool& rotated);
+
+    struct rect
+    {
+        // Fill these in before calling.
+        int w, h;
+
+        // These are set by push(). If (-1, -1), the rect placing was
+        // unsuccessful.
+        int x = -1, y = -1;
+        // If you don't allow rotation, this will always be set to false and you
+        // don't have to care about it.
+        bool rotated = false;
+    };
+
+    // This is not a very smart algorithm. It just sorts the inputs by area
+    // first. It is fast-ish though.
+    void push(rect* rects, size_t count, bool allow_rotation = false);
+
+    // This is the slow version. It tries to find the lowest cost per perimeter
+    // rect, then inserts that and repeats this process until all rects have
+    // been handled. Failed rects are removed instantly, though. Be aware of
+    // this being O(n^2) though.
+    void push_slow(rect* rects, size_t count, bool allow_rotation = false);
 
 private:
     struct free_rect
@@ -49,6 +83,8 @@ private:
         free_rect& right,
         std::vector<free_rect*>& path
     );
+
+    int find_min_cost(int& x, int& y, int w, int h, std::vector<free_rect*>& path);
 
     void place(int x, int y, int w, int h, std::vector<free_rect*>& path);
     int calculate_cost(int x, int y, int w, int h, const std::vector<free_rect*>& path);

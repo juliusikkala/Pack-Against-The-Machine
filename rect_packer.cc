@@ -77,67 +77,170 @@ void rect_packer::reset()
     free_space.push_back({{}, {}, 0, 0, canvas_w, canvas_h});
 }
 
-bool rect_packer::push(int w, int h, int& best_x, int& best_y)
+bool rect_packer::push(int w, int h, int& x, int& y)
 {
-    int best_cost = -1;
     std::vector<free_rect*> path;
-    std::vector<free_rect*> best_path;
-    for(free_rect& r: free_space)
+    int cost = find_min_cost(x, y, w, h, path);
+
+    // No fit, fail.
+    if(cost == -1) return false;
+
+    place(x, y, w, h, path);
+
+    return true;
+}
+
+bool rect_packer::push_rotate(int w, int h, int& x, int& y, bool& rotated)
+{
+    // Fast path if we rotation is meaningless.
+    if(w == h)
     {
-        // No vertical fit
-        if(h > r.h) continue;
+        rotated = false;
+        return push(w, h, x, y);
+    }
 
-        bool easy_fit = w <= r.w;
+    // Try both orientations.
+    int rot_x, rot_y;
+    std::vector<free_rect*> path, rot_path;
+    int cost = find_min_cost(x, y, w, h, path);
+    int rot_cost = find_min_cost(rot_x, rot_y, h, w, rot_path);
 
-        // Left edge
-        if(!r.right.empty() || r.left.empty())
+    // Pick cheaper orientation, preferring non-rotated version.
+    if(cost != -1 && cost <= rot_cost)
+    {
+        rotated = false;
+        place(x, y, w, h, path);
+    }
+    else if(rot_cost != -1 && cost > rot_cost)
+    {
+        rotated = true;
+        x = rot_x;
+        y = rot_y;
+        place(rot_x, rot_y, h, w, rot_path);
+    }
+    else return false;
+    return true;
+}
+
+void rect_packer::push(rect* rects, size_t count, bool allow_rotation)
+{
+    std::vector<rect*> rr;
+    rr.resize(count);
+    for(unsigned i = 0; i < count; ++i)
+    {
+        rr[i] = rects + i;
+        rr[i]->rotated = false;
+    }
+
+    std::sort(
+        rr.begin(),
+        rr.end(),
+        [](const rect* a, const rect* b){return a->w * a->h > b->w * b->h;}
+    );
+
+    for(rect* r: rr)
+    {
+        if(allow_rotation)
         {
-            int max_y = easy_fit && r.left.empty() ? r.y : r.y + r.h - h;
-            int x = r.x;
-
-            for(int y = r.y; y <= max_y; ++y)
+            if(!push_rotate(r->w, r->h, r->x, r->y, r->rotated))
             {
-                if(!find_right_neighbor_path(y, w, h, r, path))
-                    continue;
-                int cost = calculate_cost(x, y, w, h, path);
-                if(best_cost == -1 || cost < best_cost)
-                {
-                    best_cost = cost;
-                    best_path = path;
-                    best_x = x;
-                    best_y = y;
-                }
+                r->x = -1;
+                r->y = -1;
             }
         }
-
-        // Right edge
-        if(!r.left.empty())
+        else
         {
-            int max_y = easy_fit && r.right.empty() ? r.y : r.y + r.h - h;
-            int x = r.x + r.w - w;
-
-            for(int y = r.y; y <= max_y; ++y)
+            if(!push(r->w, r->h, r->x, r->y))
             {
-                if(!find_left_neighbor_path(y, w, h, r, path))
-                    continue;
-                int cost = calculate_cost(x, y, w, h, path);
-                if(best_cost == -1 || cost < best_cost)
-                {
-                    best_cost = cost;
-                    best_path = path;
-                    best_x = x;
-                    best_y = y;
-                }
+                r->x = -1;
+                r->y = -1;
             }
         }
     }
+}
 
-    // No fit, fail.
-    if(best_cost == -1) return false;
+void rect_packer::push_slow(rect* rects, size_t count, bool allow_rotation)
+{
+    std::vector<rect*> rr;
+    rr.resize(count);
+    for(unsigned i = 0; i < count; ++i)
+    {
+        rr[i] = rects + i;
+        rr[i]->x = -1;
+        rr[i]->y = -1;
+        rr[i]->rotated = false;
+    }
 
-    place(best_x, best_y, w, h, best_path);
+    while(rr.size())
+    {
+        int min_cost_index = -1;
+        float min_cost = -1;
+        std::vector<free_rect*> best_path;
+        bool best_rotated = false;
+        int best_x = -1, best_y = -1;
+        std::vector<free_rect*> path;
+        for(unsigned i = 0; i < rr.size(); ++i)
+        {
+            int perimeter = rr[i]->w*2 + rr[i]->h*2;
+            int x = -1, y = -1;
+            bool no_fit = true;
 
-    return true;
+            float cost = find_min_cost(x, y, rr[i]->w, rr[i]->h, path)
+                / (float)perimeter;
+            if(cost >= 0)
+            {
+                no_fit = false;
+                if(min_cost < 0 || cost < min_cost)
+                {
+                    best_rotated = false;
+                    best_x = x;
+                    best_y = y;
+                    best_path = path;
+                    min_cost_index = i;
+                    min_cost = cost;
+                }
+            }
+
+            if(allow_rotation)
+            {
+                cost = find_min_cost(x, y, rr[i]->h, rr[i]->w, path)
+                    / (float)perimeter;
+                if(cost >= 0)
+                {
+                    no_fit = false;
+                    if(min_cost < 0 || cost < min_cost)
+                    {
+                        best_rotated = true;
+                        best_x = x;
+                        best_y = y;
+                        best_path = path;
+                        min_cost_index = i;
+                        min_cost = cost;
+                    }
+                }
+            }
+
+            // If it can't fit now, it can never fit.
+            if(no_fit)
+            {
+                rr.erase(rr.begin() + i);
+                --i;
+            }
+        }
+
+        if(min_cost_index == -1)
+            break;
+
+        rect* r = rr[min_cost_index];
+        r->x = best_x;
+        r->y = best_y;
+        r->rotated = best_rotated;
+
+        if(!best_rotated) place(best_x, best_y, r->w, r->h, best_path);
+        else place(best_x, best_y, r->h, r->w, best_path);
+
+        rr.erase(rr.begin() + min_cost_index);
+    }
 }
 
 void rect_packer::merge()
@@ -241,6 +344,65 @@ bool rect_packer::find_left_neighbor_path(
     }
     std::reverse(path.begin(), path.end());
     return true;
+}
+
+int rect_packer::find_min_cost(
+    int& best_x, int& best_y, int w, int h,
+    std::vector<free_rect*>& best_path
+){
+    int best_cost = -1;
+    std::vector<free_rect*> path;
+    for(free_rect& r: free_space)
+    {
+        // No vertical fit
+        if(h > r.h) continue;
+
+        bool easy_fit = w <= r.w;
+
+        // Left edge
+        if(!r.right.empty() || r.left.empty())
+        {
+            int max_y = easy_fit && r.left.empty() ? r.y : r.y + r.h - h;
+            int x = r.x;
+
+            for(int y = r.y; y <= max_y; ++y)
+            {
+                if(!find_right_neighbor_path(y, w, h, r, path))
+                    continue;
+                int cost = calculate_cost(x, y, w, h, path);
+                if(best_cost == -1 || cost < best_cost)
+                {
+                    best_cost = cost;
+                    best_path = path;
+                    best_x = x;
+                    best_y = y;
+                }
+            }
+        }
+
+        // Right edge
+        if(!r.left.empty())
+        {
+            int max_y = easy_fit && r.right.empty() ? r.y : r.y + r.h - h;
+            int x = r.x + r.w - w;
+
+            for(int y = r.y; y <= max_y; ++y)
+            {
+                if(!find_left_neighbor_path(y, w, h, r, path))
+                    continue;
+                int cost = calculate_cost(x, y, w, h, path);
+                if(best_cost == -1 || cost < best_cost)
+                {
+                    best_cost = cost;
+                    best_path = path;
+                    best_x = x;
+                    best_y = y;
+                }
+            }
+        }
+    }
+
+    return best_cost;
 }
 
 void rect_packer::place(
