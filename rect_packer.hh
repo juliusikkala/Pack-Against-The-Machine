@@ -50,15 +50,9 @@ public:
     };
 
     // This is not a very smart algorithm. It just sorts the inputs by area
-    // first. It is fast-ish though.
+    // first. The results are surprisingly good, especially if rotation is 
+    // enabled.
     void pack(rect* rects, size_t count, bool allow_rotation = false);
-
-    // This is the slow version. It tries to find the lowest cost per perimeter
-    // rect, then inserts that and repeats this process until all rects have
-    // been handled. Failed rects are removed instantly, though. Be aware of
-    // this being O(n^2) though.
-    void pack_slow(rect* rects, size_t count, bool allow_rotation = false);
-
 private:
     struct free_rect
     {

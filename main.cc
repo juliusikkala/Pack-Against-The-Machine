@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <ctime>
 
-static int initial_seed = 1555097569;//time(nullptr);
+static int initial_seed = time(nullptr);
 
 template<typename T>
 void shuffle(std::vector<T>& v)
@@ -99,7 +99,10 @@ int main()
     rect_packer packer(w, h);
     int pack_index = 0;
 
+    bool at_once = true;
+
     std::vector<board::rect> rects;
+    std::vector<rect_packer::rect> rects_queue;
 
     auto reset = [&](){
         printf("Board reset!\n");
@@ -110,11 +113,17 @@ int main()
 
         rects = generate_guillotine_set(w, h, 12);
         shuffle(rects);
+        rects_queue.clear();
         for(unsigned i = 0; i < rects.size(); ++i)
         {
             rects[i].id = i;
             orig_board.place(rects[i]);
+
+            if(at_once) rects_queue.push_back({rects[i].w, rects[i].h});
         }
+
+        if(at_once)
+            packer.pack(rects_queue.data(), rects_queue.size(), true);
     };
 
     auto step = [&](){
@@ -122,7 +131,21 @@ int main()
         {
             board::rect r = rects[pack_index];
             bool rotated = false;
-            if(packer.pack_rotate(r.w, r.h, r.x, r.y, rotated))
+            bool success = false;
+            if(at_once)
+            {
+                rect_packer::rect p = rects_queue[pack_index];
+                r.x = p.x;
+                r.y = p.y;
+                rotated = p.rotated;
+                success = r.x != -1;
+            }
+            else
+            {
+                success = packer.pack_rotate(r.w, r.h, r.x, r.y, rotated);
+                //success = packer.pack(r.w, r.h, r.x, r.y);
+            }
+            if(success)
             {
                 if(rotated)
                 {
@@ -131,6 +154,7 @@ int main()
                     r.h = tmp;
                 }
                 pack_board.place(r);
+                printf("Packed %d\n", pack_index);
             }
             else
             {
