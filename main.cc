@@ -113,18 +113,7 @@ int main()
         pack_index = 0;
 
         rects = generate_guillotine_set(w, h, w*4);
-        if(!at_once) shuffle(rects);
-        else
-        {
-            std::sort(
-                rects.begin(),
-                rects.end(),
-                [](const board::rect& a, const board::rect& b){
-                    return a.w * a.h > b.w * b.h;
-                }
-            );
-        }
-
+        shuffle(rects);
         rects_queue.clear();
         for(unsigned i = 0; i < rects.size(); ++i)
         {
@@ -135,7 +124,25 @@ int main()
         }
 
         if(at_once)
+        {
             packer.pack(rects_queue.data(), rects_queue.size(), true);
+            std::sort(
+                rects_queue.begin(),
+                rects_queue.end(),
+                [](const rect_packer::rect& a, const rect_packer::rect& b){
+                    return a.w * a.h > b.w * b.h;
+                }
+            );
+            std::sort(
+                rects.begin(),
+                rects.end(),
+                [](const board::rect& a, const board::rect& b){
+                    return a.w * a.h > b.w * b.h;
+                }
+            );
+            for(unsigned i = 0; i < rects.size(); ++i)
+                rects[i].id = i;
+        }
     };
 
     auto step = [&](){
