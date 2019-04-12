@@ -12,15 +12,20 @@ project(
 src = [
   'main.cc',
   'rect_packer.cc',
-  'rect_packer.hh',
+  'board.cc',
 ]
 
 cc = meson.get_compiler('cpp')
 m_dep = cc.find_library('m', required : false)
+sfml_dep = dependency('sfml-all')
 
 executable(
   'patm',
   src,
+  dependencies: [
+    sfml_dep,
+    m_dep
+  ],
   install: true,
 )
 

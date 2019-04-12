@@ -77,7 +77,7 @@ void rect_packer::reset()
     free_space.push_back({{}, {}, 0, 0, canvas_w, canvas_h});
 }
 
-bool rect_packer::push(int w, int h, int& x, int& y)
+bool rect_packer::pack(int w, int h, int& x, int& y)
 {
     std::vector<free_rect*> path;
     int cost = find_min_cost(x, y, w, h, path);
@@ -90,13 +90,13 @@ bool rect_packer::push(int w, int h, int& x, int& y)
     return true;
 }
 
-bool rect_packer::push_rotate(int w, int h, int& x, int& y, bool& rotated)
+bool rect_packer::pack_rotate(int w, int h, int& x, int& y, bool& rotated)
 {
     // Fast path if we rotation is meaningless.
     if(w == h)
     {
         rotated = false;
-        return push(w, h, x, y);
+        return pack(w, h, x, y);
     }
 
     // Try both orientations.
@@ -122,7 +122,7 @@ bool rect_packer::push_rotate(int w, int h, int& x, int& y, bool& rotated)
     return true;
 }
 
-void rect_packer::push(rect* rects, size_t count, bool allow_rotation)
+void rect_packer::pack(rect* rects, size_t count, bool allow_rotation)
 {
     std::vector<rect*> rr;
     rr.resize(count);
@@ -142,7 +142,7 @@ void rect_packer::push(rect* rects, size_t count, bool allow_rotation)
     {
         if(allow_rotation)
         {
-            if(!push_rotate(r->w, r->h, r->x, r->y, r->rotated))
+            if(!pack_rotate(r->w, r->h, r->x, r->y, r->rotated))
             {
                 r->x = -1;
                 r->y = -1;
@@ -150,7 +150,7 @@ void rect_packer::push(rect* rects, size_t count, bool allow_rotation)
         }
         else
         {
-            if(!push(r->w, r->h, r->x, r->y))
+            if(!pack(r->w, r->h, r->x, r->y))
             {
                 r->x = -1;
                 r->y = -1;
@@ -159,7 +159,7 @@ void rect_packer::push(rect* rects, size_t count, bool allow_rotation)
     }
 }
 
-void rect_packer::push_slow(rect* rects, size_t count, bool allow_rotation)
+void rect_packer::pack_slow(rect* rects, size_t count, bool allow_rotation)
 {
     std::vector<rect*> rr;
     rr.resize(count);

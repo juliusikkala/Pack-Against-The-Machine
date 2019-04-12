@@ -30,18 +30,18 @@ public:
     // coordinates of the corner closest to your origin are written to x and y.
     // (that corner typically means the top-left corner in rasterizing 2D apps,
     // but this class doesn't actually care about coordinate directions)
-    bool push(int w, int h, int& x, int& y);
+    bool pack(int w, int h, int& x, int& y);
 
-    // push(), but allows 90 degree rotation of the input rectangle. rotated is
+    // pack(), but allows 90 degree rotation of the input rectangle. rotated is
     // set to true if that happened.
-    bool push_rotate(int w, int h, int& x, int& y, bool& rotated);
+    bool pack_rotate(int w, int h, int& x, int& y, bool& rotated);
 
     struct rect
     {
         // Fill these in before calling.
         int w, h;
 
-        // These are set by push(). If (-1, -1), the rect placing was
+        // These are set by pack(). If (-1, -1), the rect placing was
         // unsuccessful.
         int x = -1, y = -1;
         // If you don't allow rotation, this will always be set to false and you
@@ -51,13 +51,13 @@ public:
 
     // This is not a very smart algorithm. It just sorts the inputs by area
     // first. It is fast-ish though.
-    void push(rect* rects, size_t count, bool allow_rotation = false);
+    void pack(rect* rects, size_t count, bool allow_rotation = false);
 
     // This is the slow version. It tries to find the lowest cost per perimeter
     // rect, then inserts that and repeats this process until all rects have
     // been handled. Failed rects are removed instantly, though. Be aware of
     // this being O(n^2) though.
-    void push_slow(rect* rects, size_t count, bool allow_rotation = false);
+    void pack_slow(rect* rects, size_t count, bool allow_rotation = false);
 
 private:
     struct free_rect
