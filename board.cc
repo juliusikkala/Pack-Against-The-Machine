@@ -181,6 +181,7 @@ void board::draw(
     }
 }
 
+/*
 void board::draw_debug_edges(
     sf::RenderWindow& win,
     rect_packer& pack,
@@ -215,3 +216,4 @@ void board::draw_debug_edges(
         win.draw(grid_line, 2, sf::Lines);
     }
 }
+*/

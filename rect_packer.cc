@@ -1,6 +1,5 @@
 #include "rect_packer.hh"
 #include <algorithm>
-#include <cstdio>
 #define TILES 32
 
 namespace
@@ -54,10 +53,15 @@ void rect_packer::set_open(bool open)
     this->open = open;
 }
 
-bool rect_packer::pack(int w, int h, int& x, int& y)
+bool rect_packer::pack(int w, int h, int& x, int& y, bool full_search)
 {
     std::vector<free_edge*> affected;
-    int score = find_max_score(w, h, x, y, affected);
+
+    int score = 0;
+    if(full_search)
+        score = find_max_score_full(w, h, x, y, affected);
+    else
+        score = find_max_score_corner(w, h, x, y, affected);
 
     // No fit, fail.
     if(score == 0) return false;
@@ -67,8 +71,9 @@ bool rect_packer::pack(int w, int h, int& x, int& y)
     return true;
 }
 
-bool rect_packer::pack_rotate(int w, int h, int& x, int& y, bool& rotated)
-{
+bool rect_packer::pack_rotate(
+    int w, int h, int& x, int& y, bool& rotated, bool full_search
+){
     // Fast path if we rotation is meaningless.
     if(w == h)
     {
@@ -79,8 +84,19 @@ bool rect_packer::pack_rotate(int w, int h, int& x, int& y, bool& rotated)
     // Try both orientations.
     int rot_x, rot_y;
     std::vector<free_edge*> affected, rot_affected;
-    int score = find_max_score(w, h, x, y, affected);
-    int rot_score = find_max_score(h, w, rot_x, rot_y, rot_affected);
+    int score = 0;
+    int rot_score = 0;
+
+    if(full_search)
+    {
+        score = find_max_score_full(w, h, x, y, affected);
+        rot_score = find_max_score_full(h, w, rot_x, rot_y, rot_affected);
+    }
+    else
+    {
+        score = find_max_score_corner(w, h, x, y, affected);
+        rot_score = find_max_score_corner(h, w, rot_x, rot_y, rot_affected);
+    }
 
     if(score == 0 && rot_score == 0) return false;
 
@@ -96,11 +112,13 @@ bool rect_packer::pack_rotate(int w, int h, int& x, int& y, bool& rotated)
         x = rot_x; y = rot_y;
         place_rect(x, y, h, w, rot_affected);
     }
+
     return true;
 }
 
-int rect_packer::pack(rect* rects, size_t count, bool allow_rotation)
-{
+int rect_packer::pack(
+    rect* rects, size_t count, bool allow_rotation, bool full_search
+){
     int packed = 0;
 
     std::vector<rect*> rr;
@@ -123,7 +141,7 @@ int rect_packer::pack(rect* rects, size_t count, bool allow_rotation)
         ++i;
         if(allow_rotation)
         {
-            if(!pack_rotate(r->w, r->h, r->x, r->y, r->rotated))
+            if(!pack_rotate(r->w, r->h, r->x, r->y, r->rotated, full_search))
             {
                 r->x = -1;
                 r->y = -1;
@@ -132,7 +150,7 @@ int rect_packer::pack(rect* rects, size_t count, bool allow_rotation)
         }
         else
         {
-            if(!pack(r->w, r->h, r->x, r->y))
+            if(!pack(r->w, r->h, r->x, r->y, full_search))
             {
                 r->x = -1;
                 r->y = -1;
@@ -190,12 +208,12 @@ void rect_packer::recalc_edge_lookup()
     }
 }
 
-int rect_packer::find_max_score(
+int rect_packer::find_max_score_full(
     int w, int h, int& best_x, int& best_y,
     std::vector<free_edge*>& best_affected_edges
 ){
-    std::vector<free_edge*> tmp;
     int best_score = 0;
+    int ideal = (w + h) * 2;
     for(free_edge& edge: edges)
     {
         if(edge.vertical)
@@ -238,6 +256,64 @@ int rect_packer::find_max_score(
                 }
             }
         }
+        if(best_score == ideal) break;
+    }
+    return best_score;
+}
+
+int rect_packer::find_max_score_corner(
+    int w, int h, int& best_x, int& best_y,
+    std::vector<free_edge*>& best_affected_edges
+){
+    int best_score = 0;
+    int ideal = (w + h) * 2;
+    for(free_edge& edge: edges)
+    {
+        if(edge.vertical)
+        {
+            int x = edge.x;
+            if(!edge.up_right_inside) x -= w;
+            if(x < 0 || x + w > canvas_w) continue;
+
+            int endpoints[2] = { edge.y, edge.y+edge.length-h };
+
+            for(int y: endpoints)
+            {
+                if(y < 0 || y + h > canvas_h) continue;
+
+                int score = score_rect(x, y, w, h, tmp);
+                if(score > best_score)
+                {
+                    best_score = score;
+                    best_x = x;
+                    best_y = y;
+                    best_affected_edges = tmp;
+                }
+            }
+        }
+        else
+        {
+            int y = edge.y;
+            if(!edge.up_right_inside) y -= h;
+            if(y < 0 || y + h > canvas_h) continue;
+
+            int endpoints[2] = { edge.x, edge.x+edge.length-w };
+
+            for(int x: endpoints)
+            {
+                if(x < 0 || x + w > canvas_w) continue;
+
+                int score = score_rect(x, y, w, h, tmp);
+                if(score > best_score)
+                {
+                    best_score = score;
+                    best_x = x;
+                    best_y = y;
+                    best_affected_edges = tmp;
+                }
+            }
+        }
+        if(best_score == ideal) break;
     }
     return best_score;
 }
@@ -365,7 +441,6 @@ void rect_packer::place_rect(
     edges.insert(edges.end(), hori_rect_edges.begin(), hori_rect_edges.end());
 
     recalc_edge_lookup();
-    edge_dump();
 }
 
 void rect_packer::edge_clip(
@@ -418,15 +493,4 @@ void rect_packer::edge_clip(
             --i;
         }
     }
-}
-
-void rect_packer::edge_dump()
-{
-    /*
-    printf("Edge dump:\n");
-    for(auto& edge: edges)
-    {
-        printf("%d, %d, %d, %s, %s\n", edge.x, edge.y, edge.length, edge.vertical ? "vertical" : "horizontal", edge.up_right_inside ? "up-right" : "bottom-left");
-    }
-    */
 }

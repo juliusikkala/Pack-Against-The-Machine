@@ -21,8 +21,6 @@
 // space.
 class rect_packer
 {
-//!!!!!!!!!!!!!!TODO!!!!!!!!!!!!!!!!!!!!REMOVE
-friend class board;
 public:
     rect_packer(int w = 0, int h = 0, bool open = false);
 
@@ -41,11 +39,13 @@ public:
     // coordinates of the corner closest to your origin are written to x and y.
     // (that corner typically means the top-left corner in rasterizing 2D apps,
     // but this class doesn't actually care about coordinate directions)
-    bool pack(int w, int h, int& x, int& y);
+    bool pack(int w, int h, int& x, int& y, bool full_search = false);
 
     // pack(), but allows 90 degree rotation of the input rectangle. rotated is
     // set to true if that happened.
-    bool pack_rotate(int w, int h, int& x, int& y, bool& rotated);
+    bool pack_rotate(
+        int w, int h, int& x, int& y, bool& rotated, bool full_search = false
+    );
 
     struct rect
     {
@@ -63,7 +63,10 @@ public:
     // This is not a very smart algorithm. It just sorts the inputs by area
     // first. The results are surprisingly good, especially if rotation is 
     // enabled. The number of packed rects is returned.
-    int pack(rect* rects, size_t count, bool allow_rotation = false);
+    int pack(
+        rect* rects, size_t count, bool allow_rotation = false,
+        bool full_search = false
+    );
 
 private:
     struct free_edge
@@ -75,7 +78,14 @@ private:
 
     void recalc_edge_lookup();
 
-    int find_max_score(
+    // Slow, but never misses possible rect placements.
+    int find_max_score_full(
+        int w, int h, int& x, int& y,
+        std::vector<free_edge*>& affected_edges
+    );
+
+    // Fast, but may miss possible placements.
+    int find_max_score_corner(
         int w, int h, int& x, int& y,
         std::vector<free_edge*>& affected_edges
     );
@@ -96,8 +106,6 @@ private:
 
     void edge_clip(const free_edge& mask, std::vector<free_edge>& clipped);
 
-    void edge_dump();
-
     std::vector<free_edge> edges;
     int canvas_w, canvas_h;
     std::vector<
@@ -107,6 +115,9 @@ private:
     int lookup_w, lookup_h;
     bool open;
     unsigned marker;
+
+    // Stored here to avoid allocations.
+    std::vector<free_edge*> tmp;
 };
 
 #endif
