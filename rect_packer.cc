@@ -1,5 +1,7 @@
 #include "rect_packer.hh"
 #include <algorithm>
+#include <cstdio>
+#define TILES 32
 
 namespace
 {
@@ -10,70 +12,41 @@ namespace
 }
 
 rect_packer::rect_packer(int w, int h, bool open)
-: open(open)
+: open(open), marker(0)
 {
     reset(w, h);
 }
 
 void rect_packer::enlarge(int w, int h)
 {
-    std::vector<free_rect> add;
-    int handled_x = 0;
-    // Loop all free space, looking for top-aligned rects
-    for(unsigned i = 0; i < free_space.size(); ++i)
-    {
-        free_rect& r = free_space[i];
-        // If aligned to top
-        if(r.y + r.h == canvas_h)
-        {
-            // Handle adding un-extended space
-            if(r.x != handled_x)
-            {
-                add.push_back(
-                    {{}, {}, handled_x, canvas_h, r.x - handled_x, h - canvas_h}
-                );
-            }
-            // Extend to new canvas size
-            r.h += h - canvas_h;
-            handled_x = r.x + r.w;
-        }
-    }
-
-    if(handled_x != canvas_w)
-    {
-        add.push_back(
-            {{}, {}, handled_x, canvas_h, canvas_w - handled_x, h - canvas_h}
-        );
-    }
-
-    add.push_back({{}, {}, canvas_w, 0, w - canvas_w, h});
-
-    // Add new rects
-    size_t old_len = free_space.size();
-    free_space.insert(free_space.end(), add.begin(), add.end());
-    std::inplace_merge(
-        free_space.begin(),
-        free_space.begin() + old_len,
-        free_space.end(),
-        [](const free_rect& a, const free_rect& b){ return a.x < b.x; }
-    );
-    canvas_w = w;
-    canvas_h = h;
-    merge();
-    update_neighbors();
+    // TODO: Implement
+    (void)w;
+    (void)h;
 }
 
 void rect_packer::reset(int w, int h)
 {
     canvas_w = w;
     canvas_h = h;
+    cell_w = std::max(w/TILES,1);
+    cell_h = std::max(h/TILES,1);
+    lookup_w = (canvas_w + cell_w-1) / cell_w;
+    lookup_h = (canvas_h + cell_h-1) / cell_h;
     reset();
 }
 
 void rect_packer::reset()
 {
-    free_space.clear();
-    free_space.push_back({{}, {}, 0, 0, canvas_w, canvas_h});
+    edge_lookup.resize(TILES*TILES);
+    for(auto& cell: edge_lookup)
+        cell.clear();
+
+    edges.clear();
+    edges.push_back({0, 0, canvas_h, true, true, marker});
+    edges.push_back({0, 0, canvas_w, false, true, marker});
+    edges.push_back({canvas_w, 0, canvas_h, true, false, marker});
+    edges.push_back({0, canvas_h, canvas_w, false, false, marker});
+    recalc_edge_lookup();
 }
 
 void rect_packer::set_open(bool open)
@@ -83,13 +56,13 @@ void rect_packer::set_open(bool open)
 
 bool rect_packer::pack(int w, int h, int& x, int& y)
 {
-    std::vector<free_rect*> path;
-    int cost = find_min_cost(x, y, w, h, path);
+    std::vector<free_edge*> affected;
+    int score = find_max_score(w, h, x, y, affected);
 
     // No fit, fail.
-    if(cost == -1) return false;
+    if(score == 0) return false;
 
-    place(x, y, w, h, path);
+    place_rect(x, y, w, h, affected);
 
     return true;
 }
@@ -105,29 +78,31 @@ bool rect_packer::pack_rotate(int w, int h, int& x, int& y, bool& rotated)
 
     // Try both orientations.
     int rot_x, rot_y;
-    std::vector<free_rect*> path, rot_path;
-    int cost = find_min_cost(x, y, w, h, path);
-    int rot_cost = find_min_cost(rot_x, rot_y, h, w, rot_path);
+    std::vector<free_edge*> affected, rot_affected;
+    int score = find_max_score(w, h, x, y, affected);
+    int rot_score = find_max_score(h, w, rot_x, rot_y, rot_affected);
 
-    // Pick cheaper orientation, preferring non-rotated version.
-    if(cost != -1 && (cost <= rot_cost || rot_cost == -1))
+    if(score == 0 && rot_score == 0) return false;
+
+    // Pick better orientation, preferring non-rotated version.
+    if(score >= rot_score)
     {
         rotated = false;
-        place(x, y, w, h, path);
+        place_rect(x, y, w, h, affected);
     }
-    else if(rot_cost != -1 && (cost > rot_cost || cost == -1))
+    else
     {
         rotated = true;
-        x = rot_x;
-        y = rot_y;
-        place(rot_x, rot_y, h, w, rot_path);
+        x = rot_x; y = rot_y;
+        place_rect(x, y, h, w, rot_affected);
     }
-    else return false;
     return true;
 }
 
-void rect_packer::pack(rect* rects, size_t count, bool allow_rotation)
+int rect_packer::pack(rect* rects, size_t count, bool allow_rotation)
 {
+    int packed = 0;
+
     std::vector<rect*> rr;
     rr.resize(count);
     for(unsigned i = 0; i < count; ++i)
@@ -139,11 +114,13 @@ void rect_packer::pack(rect* rects, size_t count, bool allow_rotation)
     std::sort(
         rr.begin(),
         rr.end(),
-        [](const rect* a, const rect* b){return a->w * a->h > b->w * b->h;}
+        [](const rect* a, const rect* b){return a->w + a->h > b->w + b->h;}
     );
 
+    unsigned i = 0;
     for(rect* r: rr)
     {
+        ++i;
         if(allow_rotation)
         {
             if(!pack_rotate(r->w, r->h, r->x, r->y, r->rotated))
@@ -151,6 +128,7 @@ void rect_packer::pack(rect* rects, size_t count, bool allow_rotation)
                 r->x = -1;
                 r->y = -1;
             }
+            else packed++;
         }
         else
         {
@@ -159,261 +137,296 @@ void rect_packer::pack(rect* rects, size_t count, bool allow_rotation)
                 r->x = -1;
                 r->y = -1;
             }
+            else packed++;
         }
     }
+    return packed;
 }
 
-void rect_packer::merge()
+void rect_packer::recalc_edge_lookup()
 {
-    // Can't trust neighbors here, unfortunately.
-    for(unsigned i = 0; i < free_space.size(); ++i)
-    {
-        free_rect& r = free_space[i];
-        // Check if a neighbor is lined up.
-        for(unsigned j = i+1; j < free_space.size(); ++j)
-        {
-            free_rect& n = free_space[j];
-            if(n.x == r.x) continue;
-            if(n.x > r.x+r.w) break;
+    marker = 0;
 
-            // If lined up,
-            if(n.y == r.y && n.y + n.h == r.y + r.h)
+    // Clear lookup
+    for(auto& cell: edge_lookup)
+        cell.clear();
+
+    // Rasterize edges on the lookup
+    for(auto& edge: edges)
+    {
+        edge.marker = 0;
+
+        int sx = edge.x/cell_w;
+        int bx = edge.x%cell_w;
+        int sy = edge.y/cell_h;
+        int by = edge.y%cell_h;
+
+        if(edge.vertical)
+        {
+            int ey = (edge.y+edge.length-1)/cell_h;
+            bool border = bx == 0 && sx > 0;
+
+            for(; sy <= ey; ++sy)
             {
-                // Widen this rect, remove neighbor.
-                r.w += n.w;
-                free_space.erase(free_space.begin() + j);
-                --j;
+                if(sx < lookup_w)
+                    edge_lookup[sy * lookup_w + sx].push_back(&edge);
+                if(border)
+                    edge_lookup[sy * lookup_w + sx-1].push_back(&edge);
+            }
+        }
+        else
+        {
+            int ex = (edge.x+edge.length-1)/cell_w;
+            bool border = by == 0 && sy > 0;
+
+            for(; sx <= ex; ++sx)
+            {
+                if(sy < lookup_h)
+                    edge_lookup[sy * lookup_w + sx].push_back(&edge);
+                if(border)
+                    edge_lookup[(sy-1) * lookup_w + sx].push_back(&edge);
             }
         }
     }
 }
 
-void rect_packer::update_neighbors()
-{
-    for(unsigned i = 0; i < free_space.size(); ++i)
-    {
-        free_rect& a = free_space[i];
-        int edge_x = a.x + a.w;
-        for(unsigned j = i + 1; j < free_space.size(); ++j)
-        {
-            free_rect& b = free_space[j];
-            if(edge_x < b.x) break;
-            else if(edge_x == b.x && calc_overlap(a.y, a.h, b.y, b.h) >= 1)
-            {
-                b.left.push_back(&a);
-                a.right.push_back(&b);
-            }
-        }
-    }
-}
-
-bool rect_packer::find_right_neighbor_path(
-    int y, int w, int h,
-    free_rect& left,
-    std::vector<free_rect*>& path
+int rect_packer::find_max_score(
+    int w, int h, int& best_x, int& best_y,
+    std::vector<free_edge*>& best_affected_edges
 ){
-    path.clear();
-    path.push_back(&left);
-
-    free_rect* cur = &left;
-    int total_w = left.w;
-    while(total_w < w)
+    std::vector<free_edge*> tmp;
+    int best_score = 0;
+    for(free_edge& edge: edges)
     {
-        bool found = false;
-        for(free_rect* r: cur->right)
+        if(edge.vertical)
         {
-            if(r->y <= y && r->y + r->h >= y + h)
+            int x = edge.x;
+            if(!edge.up_right_inside) x -= w;
+            if(x < 0 || x + w > canvas_w) continue;
+
+            int ey = std::min(edge.y + edge.length, canvas_h - h + 1);
+
+            for(int y = edge.y; y < ey; ++y)
             {
-                cur = r;
-                found = true;
-                total_w += r->w;
-                path.push_back(r);
-                break;
-            }
-        }
-        if(!found) return false;
-    }
-    return true;
-}
-
-bool rect_packer::find_left_neighbor_path(
-    int y, int w, int h,
-    free_rect& right,
-    std::vector<free_rect*>& path
-){
-    path.clear();
-    path.push_back(&right);
-
-    free_rect* cur = &right;
-    int total_w = right.w;
-    while(total_w < w)
-    {
-        bool found = false;
-        for(free_rect* r: cur->left)
-        {
-            if(r->y <= y && r->y + r->h >= y + h)
-            {
-                cur = r;
-                found = true;
-                total_w += r->w;
-                path.push_back(r);
-                break;
-            }
-        }
-        if(!found) return false;
-    }
-    std::reverse(path.begin(), path.end());
-    return true;
-}
-
-int rect_packer::find_min_cost(
-    int& best_x, int& best_y, int w, int h,
-    std::vector<free_rect*>& best_path
-){
-    int best_cost = -1;
-    std::vector<free_rect*> path;
-    for(free_rect& r: free_space)
-    {
-        // No vertical fit
-        if(h > r.h) continue;
-
-        bool easy_fit = w < r.w;
-
-        // Left edge
-        if(!r.right.empty() || r.left.empty())
-        {
-            int max_y = easy_fit && r.left.empty() ? r.y : r.y + r.h - h;
-            int x = r.x;
-
-            for(int y = r.y; y <= max_y; ++y)
-            {
-                if(!find_right_neighbor_path(y, w, h, r, path))
-                    continue;
-                int cost = calculate_cost(x, y, w, h, path);
-                if(best_cost == -1 || cost < best_cost)
+                int score = score_rect(x, y, w, h, tmp);
+                if(score > best_score)
                 {
-                    best_cost = cost;
-                    best_path = path;
+                    best_score = score;
                     best_x = x;
                     best_y = y;
+                    best_affected_edges = tmp;
                 }
             }
         }
-
-        // Right edge
-        if(!r.left.empty())
+        else
         {
-            int max_y = easy_fit && r.right.empty() ? r.y : r.y + r.h - h;
-            int x = r.x + r.w - w;
+            int y = edge.y;
+            if(!edge.up_right_inside) y -= h;
+            if(y < 0 || y + h > canvas_h) continue;
 
-            for(int y = r.y; y <= max_y; ++y)
+            int ex = std::min(edge.x + edge.length, canvas_w - w + 1);
+
+            for(int x = edge.x; x < ex; ++x)
             {
-                if(!find_left_neighbor_path(y, w, h, r, path))
-                    continue;
-                int cost = calculate_cost(x, y, w, h, path);
-                if(best_cost == -1 || cost < best_cost)
+                int score = score_rect(x, y, w, h, tmp);
+                if(score > best_score)
                 {
-                    best_cost = cost;
-                    best_path = path;
+                    best_score = score;
                     best_x = x;
                     best_y = y;
+                    best_affected_edges = tmp;
                 }
             }
         }
     }
-
-    return best_cost;
+    return best_score;
 }
 
-void rect_packer::place(
+int rect_packer::score_rect(
     int x, int y, int w, int h,
-    std::vector<free_rect*>& path
+    std::vector<free_edge*>& affected_edges
 ){
-    // Used for transforming pointers in 'path' to indices, such that
-    // reallocating free_space doesn't destroy everything.
-    free_rect* base = free_space.data();
-    for(free_rect& r: free_space)
+    affected_edges.clear();
+
+    int score = 0;
+    int sx = x/cell_w;
+    int sy = y/cell_h;
+    int ex = (x+w-1)/cell_w;
+    int ey = (y+h-1)/cell_h;
+
+    marker++;
+    for(int cy = sy; cy <= ey; ++cy)
     {
-        r.left.clear();
-        r.right.clear();
+        for(int cx = sx; cx <= ex; ++cx)
+        {
+            auto& cell = edge_lookup[cy * lookup_w + cx];
+            for(free_edge* edge: cell)
+            {
+                if(edge->marker == marker) continue;
+                edge->marker = marker;
+
+                int escore = score_rect_edge(x, y, w, h, edge); 
+                if(escore < 0) return 0;
+                if(escore > 0)
+                {
+                    affected_edges.push_back(edge);
+                    score += escore;
+                }
+            }
+        }
+    }
+    return score;
+}
+
+int rect_packer::score_rect_edge(
+    int x, int y, int w, int h, free_edge* edge
+){
+    if(edge->vertical)
+    {
+        int score = calc_overlap(y, h, edge->y, edge->length);
+        if(x == edge->x || x + w == edge->x) return score;
+        if(edge->x > x && edge->x < x + w && score > 0) return -1;
+    }
+    else
+    {
+        int score = calc_overlap(x, w, edge->x, edge->length);
+        if(y == edge->y || y + h == edge->y) return score;
+        if(edge->y > y && edge->y < y + h && score > 0) return -1;
+    }
+    return 0;
+}
+
+// This function doesn't have to be super optimized in terms of allocations,
+// it's run only once when packing a rect.
+void rect_packer::place_rect(
+    int x, int y, int w, int h,
+    std::vector<free_edge*>& affected_edges
+){
+    std::vector<free_edge> new_edges;
+    std::vector<free_edge*> delete_edges;
+    std::vector<free_edge> vert_rect_edges;
+    std::vector<free_edge> hori_rect_edges;
+
+    vert_rect_edges.push_back({x,y,h,true,false,marker});
+    vert_rect_edges.push_back({x+w,y,h,true,true,marker});
+
+    hori_rect_edges.push_back({x,y,w,false,false,marker});
+    hori_rect_edges.push_back({x,y+h,w,false,true,marker});
+
+    for(free_edge* edge: affected_edges)
+    {
+        free_edge a, b;
+
+        if(edge->vertical)
+        {
+            a = {
+                edge->x, edge->y, y - edge->y,
+                true, edge->up_right_inside, marker
+            };
+            b = {
+                edge->x, y + h, edge->y + edge->length - y - h,
+                true, edge->up_right_inside, marker
+            };
+            edge_clip(*edge, vert_rect_edges);
+        }
+        else
+        {
+            a = {
+                edge->x, edge->y, x - edge->x,
+                false, edge->up_right_inside, marker
+            };
+            b = {
+                x + w, edge->y, edge->x + edge->length - x - w,
+                false, edge->up_right_inside, marker
+            };
+            edge_clip(*edge, hori_rect_edges);
+        }
+
+        if(a.length > 0 && b.length > 0)
+        {
+            *edge = a;
+            new_edges.push_back(b);
+        }
+        else if(a.length > 0) *edge = a;
+        else if(b.length > 0) *edge = b;
+        else delete_edges.push_back(edge);
     }
 
-    int split = free_space.size();
-    // Create new split rects & push them to the space.
-    for(free_rect* r: path)
+    std::sort(delete_edges.begin(), delete_edges.end());
+    free_edge* base = edges.data();
+    for(free_edge* edge: delete_edges)
     {
-        int left_x = std::max(r->x, x);
-        int right_x = std::min(r->x + r->w, x + w);
-        free_rect left{{},{}, r->x, r->y, x - r->x, r->h};
-        free_rect right{{},{}, x + w, r->y, r->x + r->w - x - w, r->h};
-        free_rect above{{},{}, left_x, y + h, right_x - left_x, r->y + r->h - y - h};
-        free_rect below{{},{}, left_x, r->y, right_x - left_x, y - r->y};
-
-        if(left.w > 0) free_space.push_back(left);
-        if(above.h > 0) free_space.push_back(above);
-        if(below.h > 0) free_space.push_back(below);
-        if(right.w > 0) free_space.push_back(right);
-    }
-
-    // Delete old path
-    for(free_rect* r: path)
-    {
-        unsigned i = r - base;
-        free_space.erase(free_space.begin()+i);
+        edges.erase(edges.begin()+(edge-base));
         base++;
-        split--;
     }
 
-    // Merge new rects
-    std::inplace_merge(
-        free_space.begin(),
-        free_space.begin() + split,
-        free_space.end(),
-        [](const free_rect& a, const free_rect& b){ return a.x < b.x; }
-    );
-    merge();
-    update_neighbors();
+    edges.insert(edges.end(), new_edges.begin(), new_edges.end());
+    edges.insert(edges.end(), vert_rect_edges.begin(), vert_rect_edges.end());
+    edges.insert(edges.end(), hori_rect_edges.begin(), hori_rect_edges.end());
+
+    recalc_edge_lookup();
+    edge_dump();
 }
 
-int rect_packer::calculate_cost(
-    int x, int y, int w, int h,
-    const std::vector<free_rect*>& path
+void rect_packer::edge_clip(
+    const free_edge& mask,
+    std::vector<free_edge>& clipped
 ){
-    free_rect* left = path[0];
-    free_rect* right = path[path.size()-1];
-
-    int exposed = 0;
-
-    // Left edge
-    if(left->x == x)
+    for(unsigned i = 0; i < clipped.size(); ++i)
     {
-        for(free_rect* r: left->left)
-            exposed += calc_overlap(y, h, r->y, r->h);
+        free_edge* edge = &clipped[i];
+
+        free_edge a, b;
+        if(mask.vertical)
+        {
+            if(mask.x != edge->x) continue;
+            a = {
+                edge->x, edge->y, std::min(mask.y - edge->y, edge->length),
+                true, edge->up_right_inside, marker
+            };
+            b = {
+                edge->x, std::max(mask.y + mask.length, edge->y),
+                edge->y + edge->length,
+                true, edge->up_right_inside, marker
+            };
+            b.length -= b.y;
+        }
+        else
+        {
+            if(mask.y != edge->y) continue;
+            a = {
+                edge->x, edge->y, std::min(mask.x - edge->x, edge->length),
+                false, edge->up_right_inside, marker
+            };
+            b = {
+                std::max(mask.x + mask.length, edge->x), edge->y,
+                edge->x + edge->length,
+                false, edge->up_right_inside, marker
+            };
+            b.length -= b.x;
+        }
+
+        if(a.length > 0 && b.length > 0)
+        {
+            *edge = a;
+            clipped.push_back(b);
+        }
+        else if(a.length > 0) *edge = a;
+        else if(b.length > 0) *edge = b;
+        else {
+            clipped.erase(clipped.begin()+i);
+            --i;
+        }
     }
-    else exposed += h;
-
-    // Top & bottom edges
-    for(free_rect* r: path)
-    {
-        int overlap = calc_overlap(x, w, r->x, r->w);
-        bool top_open = (y + h == canvas_h) && open;
-
-        // No top contact
-        if(r->y + r->h > y + h || top_open) exposed += overlap;
-
-        // No bottom contact
-        if(r->y < y) exposed += overlap;
-    }
-
-    bool right_open = (x + w == canvas_w) && open;
-    // Right edge
-    if(right->x + right->w == x + w && !right_open)
-    {
-        for(free_rect* r: right->right)
-            exposed += calc_overlap(y, h, r->y, r->h);
-    }
-    else exposed += h;
-
-    return exposed;
 }
 
+void rect_packer::edge_dump()
+{
+    /*
+    printf("Edge dump:\n");
+    for(auto& edge: edges)
+    {
+        printf("%d, %d, %d, %s, %s\n", edge.x, edge.y, edge.length, edge.vertical ? "vertical" : "horizontal", edge.up_right_inside ? "up-right" : "bottom-left");
+    }
+    */
+}

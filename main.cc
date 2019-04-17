@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <ctime>
 
-static int initial_seed = time(nullptr);
+static int initial_seed = 1555529424;//time(nullptr);
 
 template<typename T>
 void shuffle(std::vector<T>& v)
@@ -17,10 +17,10 @@ void shuffle(std::vector<T>& v)
 }
 
 std::vector<board::rect> generate_guillotine_set(
-    int w, int h, unsigned splits
+    int w, int h, unsigned splits, bool quiet = false
 ){
-
-    printf("Generating guillotine set for seed %d\n", initial_seed);
+    if(!quiet)
+        printf("Generating guillotine set for seed %d\n", initial_seed);
     std::mt19937 rng(initial_seed++);
     std::uniform_int_distribution<> bdis(0,1);
 
@@ -82,6 +82,102 @@ std::vector<board::rect> generate_guillotine_set(
     return rects;
 }
 
+void measure_rate(
+    int w,
+    int h,
+    unsigned splits,
+    unsigned tests,
+    bool at_once,
+    bool allow_rotation
+){
+    board pack_board(w, h);
+    rect_packer packer(w, h, false);
+    std::vector<board::rect> rects;
+    std::vector<rect_packer::rect> rects_queue;
+
+    unsigned successes = 0;
+    unsigned total_packed = 0;
+    unsigned total_count = 0;
+    double total_coverage = 0;
+    sf::Time total_time;
+    sf::Clock clock;
+    
+    for(unsigned i = 0; i < tests; ++i)
+    {
+        pack_board.reset();
+        packer.reset();
+
+        rects = generate_guillotine_set(w, h, splits, true);
+        shuffle(rects);
+
+        unsigned count = 0;
+        
+        if(at_once)
+        {
+            rects_queue.clear();
+            rects_queue.reserve(rects.size());
+            for(unsigned i = 0; i < rects.size(); ++i)
+                rects_queue.push_back({rects[i].w, rects[i].h});
+            clock.restart();
+            count = packer.pack(
+                rects_queue.data(),
+                rects_queue.size(),
+                allow_rotation
+            );
+            total_time += clock.getElapsedTime();
+            for(rect_packer::rect& r: rects_queue)
+            {
+                if(r.x != -1)
+                    pack_board.place({0, r.x, r.y, r.w, r.h});
+            }
+        }
+        else
+        {
+            clock.restart();
+            for(board::rect& r: rects)
+            {
+                if(allow_rotation)
+                {
+                    bool rotated = false;
+                    if(packer.pack_rotate(r.w,r.h,r.x,r.y,rotated))
+                    {
+                        if(rotated)
+                        {
+                            int tmp = r.w;
+                            r.w = r.h;
+                            r.h = tmp;
+                        }
+                        pack_board.place(r);
+                        count++;
+                    }
+                }
+                else
+                {
+                    if(packer.pack(r.w,r.h,r.x,r.y))
+                    {
+                        pack_board.place(r);
+                        count++;
+                    }
+                }
+            }
+            total_time += clock.getElapsedTime();
+        }
+
+        total_count += rects.size();
+        total_packed += count;
+        successes += count == rects.size() ? 1 : 0;
+        total_coverage += pack_board.coverage();
+    }
+
+    printf("%u tests at %dx%d with %u splits\n", tests, w, h, splits);
+    printf("Success rate: %f\n", successes/(double)tests);
+    printf("Rect rate: %f\n", total_packed/(double)total_count);
+    printf("Average coverage: %f\n", total_coverage/tests);
+    float time = total_time.asSeconds();
+    printf("Time: %f\n", time);
+    printf("Time per rect^2: %f\n", 1e10*time/pow((double)total_count, 2));
+}
+
 int main()
 {
     unsigned window_size = 1920;
@@ -92,15 +188,23 @@ int main()
     if(!font.loadFromFile("Inconsolata/Inconsolata-Bold.ttf"))
         throw std::runtime_error("Failed to load Inconsolata");
 
-    unsigned w = 2048;
-    unsigned h = 2048;
-    int splits = w * 4;
-    bool at_once = false;
+    unsigned w = 1024;
+    unsigned h = 1024;
+    int splits = w * 2;
+
+    bool at_once = true;
     bool allow_rotate = true;
+
+    /*
+    for(unsigned i = 1; ; i *= 2)
+    {
+        measure_rate(i, i, i*2, 100, at_once, allow_rotate);
+    }
+    */
 
     board pack_board(w, h);
     board orig_board(w, h);
-    rect_packer packer(w, h, true);
+    rect_packer packer(w, h, false);
     int pack_index = 0;
     int packed = 0;
 
@@ -130,14 +234,14 @@ int main()
                 rects_queue.begin(),
                 rects_queue.end(),
                 [](const rect_packer::rect& a, const rect_packer::rect& b){
-                    return a.w * a.h > b.w * b.h;
+                    return a.w + a.h > b.w + b.h;
                 }
             );
             std::sort(
                 rects.begin(),
                 rects.end(),
                 [](const board::rect& a, const board::rect& b){
-                    return a.w * a.h > b.w * b.h;
+                    return a.w + a.h > b.w + b.h;
                 }
             );
         }
@@ -230,6 +334,8 @@ int main()
         }
         else if(total > sf::milliseconds(4000))
         {
+            if(packed != (int)rects.size())
+                printf("Failure!\n");
             reset();
             total = sf::milliseconds(0);
             clock.restart();
@@ -237,8 +343,9 @@ int main()
 
         window.clear(sf::Color(0x404040FF));
         sf::Vector2u sz = window.getSize();
-        //pack_board.draw(window, 10, 10, sz.x/2-20, sz.y-20, true, &font);
+        //pack_board.draw(window, 10, 10, sz.x/2-20, sz.y-20, false, &font);
         //orig_board.draw(window, sz.x/2+10, 10, sz.x/2-20, sz.y-20, true, &font);
+        //pack_board.draw_debug_edges(window, packer, 10, 10, sz.x/2-20, sz.y-20);
         pack_board.draw(window, 10, 10, sz.x/2-20, sz.y-20, false, nullptr);
         orig_board.draw(window, sz.x/2+10, 10, sz.x/2-20, sz.y-20, false, nullptr);
 

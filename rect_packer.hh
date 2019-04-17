@@ -15,8 +15,14 @@
 // algorithm is quite intuitive; I designed it based on what I would do if I was
 // asked to pack arbitrary rectangles in a limited-size bin without knowledge
 // of future rectangles.
+//
+// A naive way to do this would be to simply test all possible free positions.
+// To speed up computation, the search space is limited to edges of the free
+// space.
 class rect_packer
 {
+//!!!!!!!!!!!!!!TODO!!!!!!!!!!!!!!!!!!!!REMOVE
+friend class board;
 public:
     rect_packer(int w = 0, int h = 0, bool open = false);
 
@@ -56,43 +62,51 @@ public:
 
     // This is not a very smart algorithm. It just sorts the inputs by area
     // first. The results are surprisingly good, especially if rotation is 
-    // enabled.
-    void pack(rect* rects, size_t count, bool allow_rotation = false);
+    // enabled. The number of packed rects is returned.
+    int pack(rect* rects, size_t count, bool allow_rotation = false);
+
 private:
-    struct free_rect
+    struct free_edge
     {
-        // Only temporary storage, helps checking relevant neighbors
-        std::vector<free_rect*> left, right;
-        // Size and location.
-        int x, y, w, h;
+        int x, y, length;
+        bool vertical, up_right_inside;
+        unsigned marker;
     };
 
-    // Merges free rectangles.
-    void merge();
-    void update_neighbors();
+    void recalc_edge_lookup();
 
-    bool find_right_neighbor_path(
-        int y, int w, int h,
-        free_rect& left,
-        std::vector<free_rect*>& path
+    int find_max_score(
+        int w, int h, int& x, int& y,
+        std::vector<free_edge*>& affected_edges
     );
 
-    bool find_left_neighbor_path(
-        int y, int w, int h,
-        free_rect& right,
-        std::vector<free_rect*>& path
+    // 0 if can't be placed here. Otherwise, number of blocked edges.
+    int score_rect(
+        int x, int y, int w, int h,
+        std::vector<free_edge*>& affected_edges
     );
 
-    int find_min_cost(int& x, int& y, int w, int h, std::vector<free_rect*>& path);
+    // -1 if crosses.
+    int score_rect_edge(int x, int y, int w, int h, free_edge* edge);
 
-    void place(int x, int y, int w, int h, std::vector<free_rect*>& path);
-    int calculate_cost(int x, int y, int w, int h, const std::vector<free_rect*>& path);
+    void place_rect(
+        int x, int y, int w, int h,
+        std::vector<free_edge*>& affected_edges
+    );
 
-    // This algorithm just stores the free space left as rectangles. Keep sorted
-    // by x.
-    std::vector<free_rect> free_space;
+    void edge_clip(const free_edge& mask, std::vector<free_edge>& clipped);
+
+    void edge_dump();
+
+    std::vector<free_edge> edges;
     int canvas_w, canvas_h;
+    std::vector<
+        std::vector<free_edge*>
+    > edge_lookup;
+    int cell_w, cell_h;
+    int lookup_w, lookup_h;
     bool open;
+    unsigned marker;
 };
 
 #endif

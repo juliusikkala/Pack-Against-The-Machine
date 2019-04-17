@@ -3,6 +3,7 @@
 #include <SFML/Graphics.hpp>
 #include <vector>
 
+class rect_packer;
 class board
 {
 public:
@@ -28,6 +29,13 @@ public:
         int w, int h,
         bool draw_grid,
         sf::Font* number_font
+    ) const;
+
+    void draw_debug_edges(
+        sf::RenderWindow& win,
+        rect_packer& pack,
+        int x, int y,
+        int w, int h
     ) const;
 private:
     int width, height;

@@ -2,6 +2,7 @@
 #include <cmath>
 #include <algorithm>
 #include <stdexcept>
+#include "rect_packer.hh"
 
 namespace
 {
@@ -106,7 +107,7 @@ void board::draw(
 {
     // Draw bounds
     sf::Color bounds_color(0x3C3C3CFF);
-    sf::Color background_color(0xFFFFFFFF);
+    sf::Color background_color(0x101010FF);
     sf::Vertex bounds[] = {
         sf::Vertex(sf::Vector2f(x, y)),
         sf::Vertex(sf::Vector2f(x+w, y)),
@@ -152,10 +153,11 @@ void board::draw(
         sf::Color color(generate_color(r.id, false));
         sf::Color outline_color(generate_color(r.id, true));
 
+        int fy = height-r.y;
         int sx1 = x + r.x * w / width;
-        int sy1 = y + r.y * h / height+(draw_grid ? 1 : 0);
+        int sy1 = y + fy * h / height+(draw_grid ? 1 : 0);
         int sx2 = x + (r.x+r.w) * w / width-(draw_grid ? 1 : 0);
-        int sy2 = y + (r.y+r.h) * h / height;
+        int sy2 = y + (fy-r.h) * h / height;
         int sw = sx2-sx1;
         int sh = sy2-sy1;
         sf::RectangleShape rs(sf::Vector2f(sw, sh));
@@ -176,5 +178,40 @@ void board::draw(
             number.setOrigin(lb.left + lb.width*0.5f, lb.top + lb.height*0.5f);
             win.draw(number);
         }
+    }
+}
+
+void board::draw_debug_edges(
+    sf::RenderWindow& win,
+    rect_packer& pack,
+    int x, int y,
+    int w, int h
+) const
+{
+    // Draw bounds
+    sf::Color ur_color(0x00FF00FF);
+    sf::Color bu_color(0xFF0000FF);
+
+    for(auto& edge: pack.edges)
+    {
+        sf::Color col = edge.up_right_inside ? ur_color : bu_color;
+        int x1 = edge.x;
+        int y1 = edge.y;
+        int x2 = edge.vertical ? edge.x : edge.x + edge.length;
+        int y2 = edge.vertical ? edge.y + edge.length : edge.y;
+
+        y1 = height - y1;
+        y2 = height - y2;
+
+        x1 = x + x1 * w / width;
+        y1 = y + y1 * h / height;
+        x2 = x + x2 * w / width;
+        y2 = y + y2 * h / height;
+
+        sf::Vertex grid_line[] = {
+            sf::Vertex(sf::Vector2f(x1, y1), col),
+            sf::Vertex(sf::Vector2f(x2, y2), col),
+        };
+        win.draw(grid_line, 2, sf::Lines);
     }
 }
