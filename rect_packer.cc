@@ -18,9 +18,92 @@ rect_packer::rect_packer(int w, int h, bool open)
 
 void rect_packer::enlarge(int w, int h)
 {
-    // TODO: Implement
-    (void)w;
-    (void)h;
+    tmp.clear();
+
+    std::vector<free_edge> top_edges, right_edges;
+
+    w = std::max(canvas_w, w);
+    h = std::max(canvas_h, h);
+
+    marker++;
+    if(h > canvas_h)
+    {
+        top_edges.push_back({0, canvas_h, canvas_w, false, true, marker});
+
+        for(int i = 0; i < lookup_w; ++i)
+        {
+            auto& cell = edge_lookup[(lookup_h-1) * lookup_w + i];
+            for(free_edge* edge: cell)
+            {
+                if(
+                    edge->vertical ||
+                    edge->y != canvas_h ||
+                    edge->marker == marker
+                ) continue;
+                edge->marker = marker;
+                edge_clip(*edge, top_edges);
+                tmp.push_back(edge);
+            }
+        }
+
+        top_edges.push_back({0, canvas_h, h-canvas_h, true, true, marker});
+        top_edges.push_back({0, h, w, false, false, marker});
+        if(w <= canvas_w)
+            top_edges.push_back({w, canvas_h, h-canvas_h, true, false, marker});
+    }
+
+    if(w > canvas_w)
+    {
+        right_edges.push_back({canvas_w, 0, canvas_h, true, true, marker});
+
+        for(int i = 0; i < lookup_h; ++i)
+        {
+            auto& cell = edge_lookup[i * lookup_w + lookup_w - 1];
+            for(free_edge* edge: cell)
+            {
+                if(
+                    !edge->vertical ||
+                    edge->x != canvas_w ||
+                    edge->marker == marker
+                ) continue;
+                edge->marker = marker;
+                edge_clip(*edge, right_edges);
+                tmp.push_back(edge);
+            }
+        }
+
+        right_edges.push_back({canvas_w, 0, w-canvas_w, false, true, marker});
+        right_edges.push_back({w, 0, h, true, false, marker});
+        if(h <= canvas_h)
+            right_edges.push_back(
+                {canvas_w, h, w-canvas_w, false, false, marker}
+            );
+    }
+
+    std::sort(tmp.begin(), tmp.end());
+    free_edge* base = edges.data();
+    for(free_edge* edge: tmp)
+    {
+        edges.erase(edges.begin()+(edge-base));
+        base++;
+    }
+
+    edges.insert(edges.end(), top_edges.begin(), top_edges.end());
+    edges.insert(edges.end(), right_edges.begin(), right_edges.end());
+
+    canvas_h = h;
+    cell_h = std::max(h/TILES,1);
+    lookup_h = (canvas_h + cell_h-1) / cell_h;
+
+    canvas_w = w;
+    cell_w = std::max(w/TILES,1);
+    lookup_w = (canvas_w + cell_w-1) / cell_w;
+
+    edge_lookup.resize(TILES*TILES);
+    for(auto& cell: edge_lookup)
+        cell.clear();
+
+    recalc_edge_lookup();
 }
 
 void rect_packer::reset(int w, int h)
@@ -342,8 +425,8 @@ int rect_packer::score_rect(
                 edge->marker = marker;
 
                 int escore = score_rect_edge(x, y, w, h, edge); 
-                if(escore < 0) return 0;
-                if(escore > 0)
+                if(escore == -1) return 0;
+                if(escore >= 0)
                 {
                     affected_edges.push_back(edge);
                     score += escore;
@@ -360,16 +443,18 @@ int rect_packer::score_rect_edge(
     if(edge->vertical)
     {
         int score = calc_overlap(y, h, edge->y, edge->length);
-        if(x == edge->x || x + w == edge->x) return score;
         if(edge->x > x && edge->x < x + w && score > 0) return -1;
+        if(open && edge->x == canvas_w) return 0;
+        if(x == edge->x || x + w == edge->x) return score;
     }
     else
     {
         int score = calc_overlap(x, w, edge->x, edge->length);
-        if(y == edge->y || y + h == edge->y) return score;
         if(edge->y > y && edge->y < y + h && score > 0) return -1;
+        if(open && edge->y == canvas_h) return 0;
+        if(y == edge->y || y + h == edge->y) return score;
     }
-    return 0;
+    return -2;
 }
 
 // This function doesn't have to be super optimized in terms of allocations,

@@ -188,21 +188,23 @@ int main()
     if(!font.loadFromFile("Inconsolata/Inconsolata-Bold.ttf"))
         throw std::runtime_error("Failed to load Inconsolata");
 
-    unsigned w = 1024;
-    unsigned h = 1024;
+    unsigned w = 16;
+    unsigned h = 16;
     int splits = w * 2;
 
-    bool at_once = true;
+    bool at_once = false;
     bool allow_rotate = true;
 
+    /*
     for(unsigned i = 1; ; i *= 2)
     {
         measure_rate(i, i, i*2, 100, at_once, allow_rotate);
     }
+    */
 
     board pack_board(w, h);
     board orig_board(w, h);
-    rect_packer packer(w, h, false);
+    rect_packer packer(w, h, true);
     int pack_index = 0;
     int packed = 0;
 
@@ -317,6 +319,13 @@ int main()
                     paused = !paused;
                     clock.restart();
                 }
+                if(event.key.code == sf::Keyboard::D)
+                {
+                    w *= 2;
+                    h *= 2;
+                    pack_board.resize(w, h);
+                    packer.enlarge(w, h);
+                }
             }
         }
 
@@ -341,11 +350,11 @@ int main()
 
         window.clear(sf::Color(0x404040FF));
         sf::Vector2u sz = window.getSize();
-        //pack_board.draw(window, 10, 10, sz.x/2-20, sz.y-20, false, &font);
-        //orig_board.draw(window, sz.x/2+10, 10, sz.x/2-20, sz.y-20, true, &font);
+        pack_board.draw(window, 10, 10, sz.x/2-20, sz.y-20, false, &font);
+        orig_board.draw(window, sz.x/2+10, 10, sz.x/2-20, sz.y-20, true, &font);
         //pack_board.draw_debug_edges(window, packer, 10, 10, sz.x/2-20, sz.y-20);
-        pack_board.draw(window, 10, 10, sz.x/2-20, sz.y-20, false, nullptr);
-        orig_board.draw(window, sz.x/2+10, 10, sz.x/2-20, sz.y-20, false, nullptr);
+        //pack_board.draw(window, 10, 10, sz.x/2-20, sz.y-20, false, nullptr);
+        //orig_board.draw(window, sz.x/2+10, 10, sz.x/2-20, sz.y-20, false, nullptr);
 
         if(pack_index >= (int)rects.size())
         {
