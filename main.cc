@@ -192,19 +192,17 @@ int main()
     unsigned h = 16;
     int splits = w * 2;
 
-    bool at_once = false;
+    bool at_once = true;
     bool allow_rotate = true;
 
-    /*
     for(unsigned i = 1; ; i *= 2)
     {
         measure_rate(i, i, i*2, 100, at_once, allow_rotate);
     }
-    */
 
     board pack_board(w, h);
     board orig_board(w, h);
-    rect_packer packer(w, h, true);
+    rect_packer packer(w, h, false);
     int pack_index = 0;
     int packed = 0;
 
@@ -229,7 +227,7 @@ int main()
                 rects_queue.push_back({rects[i].w, rects[i].h});
 
             printf("Generating at-once solution!\n");
-            packer.pack(rects_queue.data(), rects_queue.size(), allow_rotate, false);
+            packer.pack(rects_queue.data(), rects_queue.size(), allow_rotate);
             std::sort(
                 rects_queue.begin(),
                 rects_queue.end(),

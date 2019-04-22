@@ -39,13 +39,11 @@ public:
     // coordinates of the corner closest to your origin are written to x and y.
     // (that corner typically means the top-left corner in rasterizing 2D apps,
     // but this class doesn't actually care about coordinate directions)
-    bool pack(int w, int h, int& x, int& y, bool full_search = false);
+    bool pack(int w, int h, int& x, int& y);
 
     // pack(), but allows 90 degree rotation of the input rectangle. rotated is
     // set to true if that happened.
-    bool pack_rotate(
-        int w, int h, int& x, int& y, bool& rotated, bool full_search = false
-    );
+    bool pack_rotate(int w, int h, int& x, int& y, bool& rotated);
 
     struct rect
     {
@@ -63,10 +61,7 @@ public:
     // This is not a very smart algorithm. It just sorts the inputs by area
     // first. The results are surprisingly good, especially if rotation is 
     // enabled. The number of packed rects is returned.
-    int pack(
-        rect* rects, size_t count, bool allow_rotation = false,
-        bool full_search = false
-    );
+    int pack(rect* rects, size_t count, bool allow_rotation = false);
 
 private:
     struct free_edge
@@ -78,25 +73,21 @@ private:
 
     void recalc_edge_lookup();
 
-    // Slow, but never misses possible rect placements.
-    int find_max_score_full(
-        int w, int h, int& x, int& y,
-        std::vector<free_edge*>& affected_edges
-    );
-
-    // Fast, but may miss possible placements.
-    int find_max_score_corner(
+    int find_max_score(
         int w, int h, int& x, int& y,
         std::vector<free_edge*>& affected_edges
     );
 
     // 0 if can't be placed here. Otherwise, number of blocked edges.
+    // skip has two purposes. When calling, set it equal to 'vertical' of the
+    // edge the rect is tracking. 'skip' is set to the number of steps that must
+    // be moved towards the up or right direction until the result can be
+    // better.
     int score_rect(
-        int x, int y, int w, int h,
+        int x, int y, int w, int h, int& skip,
         std::vector<free_edge*>& affected_edges
     );
 
-    // -1 if crosses.
     int score_rect_edge(int x, int y, int w, int h, free_edge* edge);
 
     void place_rect(
