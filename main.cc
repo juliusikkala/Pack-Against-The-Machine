@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <ctime>
 
-static int initial_seed = 0;//time(nullptr);
+static int initial_seed = time(nullptr);
 
 template<typename T>
 void shuffle(std::vector<T>& v)
@@ -278,17 +278,19 @@ int main()
     if(!font.loadFromFile("Inconsolata/Inconsolata-Bold.ttf"))
         throw std::runtime_error("Failed to load Inconsolata");
 
-    unsigned w = 16;
-    unsigned h = 16;
+    unsigned w = 1024;
+    unsigned h = 1024;
     int splits = w * 2;
 
     bool at_once = true;
     bool allow_rotate = true;
 
+    /*
     for(unsigned i = 1; ; i *= 2)
     {
         measure_rate(i, i, i*2, 100, at_once, allow_rotate);
     }
+    */
 
     /*
     int prev_optimal = 1;
@@ -464,11 +466,11 @@ int main()
 
         window.clear(sf::Color(0x404040FF));
         sf::Vector2u sz = window.getSize();
-        pack_board.draw(window, 10, 10, sz.x/2-20, sz.y-20, false, &font);
-        orig_board.draw(window, sz.x/2+10, 10, sz.x/2-20, sz.y-20, true, &font);
+        //pack_board.draw(window, 10, 10, sz.x/2-20, sz.y-20, true, &font);
+        //orig_board.draw(window, sz.x/2+10, 10, sz.x/2-20, sz.y-20, true, &font);
         //pack_board.draw_debug_edges(window, packer, 10, 10, sz.x/2-20, sz.y-20);
-        //pack_board.draw(window, 10, 10, sz.x/2-20, sz.y-20, false, nullptr);
-        //orig_board.draw(window, sz.x/2+10, 10, sz.x/2-20, sz.y-20, false, nullptr);
+        pack_board.draw(window, 10, 10, sz.x/2-20, sz.y-20, false, nullptr);
+        orig_board.draw(window, sz.x/2+10, 10, sz.x/2-20, sz.y-20, false, nullptr);
 
         if(pack_index >= (int)rects.size())
         {

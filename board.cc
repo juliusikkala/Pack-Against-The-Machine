@@ -107,7 +107,7 @@ void board::draw(
 {
     // Draw bounds
     sf::Color bounds_color(0x3C3C3CFF);
-    sf::Color background_color(0x101010FF);
+    sf::Color background_color(0x303030FF);
     sf::Vertex bounds[] = {
         sf::Vertex(sf::Vector2f(x, y)),
         sf::Vertex(sf::Vector2f(x+w, y)),

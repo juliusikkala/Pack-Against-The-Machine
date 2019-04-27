@@ -22,10 +22,17 @@
 class rect_packer
 {
 public:
+    // Constructor for rect_packer. w and h determine the size of the packing
+    // area. See set_open() for details about open.
     rect_packer(int w = 0, int h = 0, bool open = false);
 
+    // Grows the packing area without clearing already packed rects.
     void enlarge(int w, int h);
+
+    // Clears the packer state, and changes the size of the packing area.
     void reset(int w, int h);
+
+    // Clears the packer state.
     void reset();
 
     // -1 for automatic. This only affects the speed of the algorithm, because
@@ -63,8 +70,8 @@ public:
         bool rotated = false;
     };
 
-    // This is not a very smart algorithm. It just sorts the inputs by area
-    // first. The results are surprisingly good, especially if rotation is 
+    // This is not a very smart algorithm. It just sorts the inputs by 
+    // perimeter. The results are surprisingly good, especially if rotation is
     // enabled. The number of packed rects is returned.
     int pack(rect* rects, size_t count, bool allow_rotation = false);
 
