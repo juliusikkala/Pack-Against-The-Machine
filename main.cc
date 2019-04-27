@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <ctime>
 
-static int initial_seed = 1555529424;//time(nullptr);
+static int initial_seed = 0;//time(nullptr);
 
 template<typename T>
 void shuffle(std::vector<T>& v)
@@ -178,6 +178,96 @@ void measure_rate(
     printf("Time per rect^2: %f\n", 1e10*time/pow((double)total_count, 2));
 }
 
+int search_optimal_tile_size(
+    int w,
+    int h,
+    unsigned splits,
+    float time_limit,
+    const std::vector<unsigned>& sizes,
+    bool at_once,
+    bool allow_rotation,
+    bool quiet = false
+){
+    rect_packer packer(w, h, false);
+    std::vector<board::rect> rects;
+    std::vector<rect_packer::rect> rects_queue;
+
+    sf::Clock clock;
+    sf::Time limit(sf::seconds(time_limit));
+
+    float best_finishes = 0;
+    unsigned best_size = 0;
+
+    if(!quiet) printf("Cell size search for %d, %d.\n", w, h);
+    for(unsigned cell_size: sizes)
+    {
+        float finishes = 0;
+        sf::Time total_time;
+
+        packer.set_cell_size(cell_size);
+
+        if(!quiet)
+        {
+            printf("Size %u: ", cell_size);
+            fflush(stdout);
+        }
+        
+        initial_seed = 0;
+        while(total_time < limit)
+        {
+            packer.reset();
+
+            rects = generate_guillotine_set(w, h, splits, true);
+            shuffle(rects);
+
+            sf::Time elapsed;
+            if(at_once)
+            {
+                rects_queue.clear();
+                rects_queue.reserve(rects.size());
+                for(unsigned i = 0; i < rects.size(); ++i)
+                    rects_queue.push_back({rects[i].w, rects[i].h});
+                clock.restart();
+                packer.pack(
+                    rects_queue.data(),
+                    rects_queue.size(),
+                    allow_rotation
+                );
+                elapsed = clock.getElapsedTime();
+            }
+            else
+            {
+                clock.restart();
+                for(board::rect& r: rects)
+                {
+                    if(allow_rotation)
+                    {
+                        bool rotated = false;
+                        packer.pack_rotate(r.w,r.h,r.x,r.y,rotated);
+                    }
+                    else packer.pack(r.w,r.h,r.x,r.y);
+                }
+                elapsed = clock.getElapsedTime();
+            }
+
+            if(total_time + elapsed < limit)
+                finishes += 1.0f;
+            else
+                finishes += (limit - total_time) / elapsed;
+            total_time += elapsed;
+        }
+
+        if(finishes >= best_finishes)
+        {
+            best_finishes = finishes;
+            best_size = cell_size;
+        }
+        if(!quiet) printf("%f\n", finishes);
+    }
+    if(!quiet) printf("Best cell size for %d, %d: %u\n", w, h, best_size);
+    return best_size;
+}
+
 int main()
 {
     unsigned window_size = 1920;
@@ -199,6 +289,32 @@ int main()
     {
         measure_rate(i, i, i*2, 100, at_once, allow_rotate);
     }
+
+    /*
+    int prev_optimal = 1;
+    std::vector<std::pair<int, int>> results;
+    for(int i = 1; i <= 24; ++i)
+    {
+        int n = 1<<(i>>1);
+        if((i&1) == 1) n += n >> 1;
+
+        std::vector<unsigned> candidates;
+        for(int j = prev_optimal-3; j < prev_optimal + 6; ++j)
+        {
+            if(j < 1 || j > n) continue;
+            candidates.push_back(j);
+        }
+        int optimal = search_optimal_tile_size(
+            n, n, n*2, 2.0f, candidates, true, true, false
+        );
+        prev_optimal = optimal;
+        results.push_back({n,optimal});
+    }
+
+    for(auto [n, cell]: results)
+        printf("%d;%d\n", n, cell);
+    return 0;
+    */
 
     board pack_board(w, h);
     board orig_board(w, h);

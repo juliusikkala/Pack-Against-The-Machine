@@ -1,6 +1,7 @@
 #include "rect_packer.hh"
 #include <algorithm>
-#define CELL_SIZE 16
+#include <cstdio>
+#include <cmath>
 
 namespace
 {
@@ -8,10 +9,17 @@ namespace
     {
         return std::max(std::min(x1 + w1, x2 + w2) - std::max(x1, x2), 0);
     }
+
+    int get_cell_size(int total_area)
+    {
+        // Largely empirical, I tested different cell sizes for different sizes
+        // of squares. This equation mostly follows the resulting values.
+        return ceil(pow(total_area, 1.0/6.0));
+    }
 }
 
 rect_packer::rect_packer(int w, int h, bool open)
-: open(open), marker(0)
+: canvas_w(w), canvas_h(h), cell_size(16), open(open), marker(0)
 {
     reset(w, h);
 }
@@ -92,28 +100,17 @@ void rect_packer::enlarge(int w, int h)
     edges.insert(edges.end(), right_edges.begin(), right_edges.end());
 
     canvas_h = h;
-    lookup_h = (canvas_h+CELL_SIZE-1)/CELL_SIZE;
-    cell_h = CELL_SIZE;
-
     canvas_w = w;
-    lookup_w = (canvas_w+CELL_SIZE-1)/CELL_SIZE;
-    cell_w = CELL_SIZE;
 
-    edge_lookup.resize(lookup_w*lookup_h);
-    for(auto& cell: edge_lookup)
-        cell.clear();
-
-    recalc_edge_lookup();
+    set_cell_size();
 }
 
 void rect_packer::reset(int w, int h)
 {
     canvas_w = w;
     canvas_h = h;
-    lookup_w = (canvas_w+CELL_SIZE-1)/CELL_SIZE;
-    lookup_h = (canvas_h+CELL_SIZE-1)/CELL_SIZE;
-    cell_w = CELL_SIZE;
-    cell_h = CELL_SIZE;
+    lookup_w = (canvas_w+cell_size-1)/cell_size;
+    lookup_h = (canvas_h+cell_size-1)/cell_size;
     reset();
 }
 
@@ -128,6 +125,21 @@ void rect_packer::reset()
     edges.push_back({0, 0, canvas_w, false, true, marker});
     edges.push_back({canvas_w, 0, canvas_h, true, false, marker});
     edges.push_back({0, canvas_h, canvas_w, false, false, marker});
+    recalc_edge_lookup();
+}
+
+void rect_packer::set_cell_size(int cell_size)
+{
+    if(cell_size < 1) cell_size = get_cell_size(canvas_w*canvas_h);
+    this->cell_size = cell_size;
+
+    lookup_h = (canvas_h+cell_size-1)/cell_size;
+    lookup_w = (canvas_w+cell_size-1)/cell_size;
+
+    edge_lookup.resize(lookup_w*lookup_h);
+    for(auto& cell: edge_lookup)
+        cell.clear();
+
     recalc_edge_lookup();
 }
 
@@ -243,14 +255,14 @@ void rect_packer::recalc_edge_lookup()
     {
         edge.marker = 0;
 
-        int sx = edge.x/cell_w;
-        int bx = edge.x%cell_w;
-        int sy = edge.y/cell_h;
-        int by = edge.y%cell_h;
+        int sx = edge.x/cell_size;
+        int bx = edge.x%cell_size;
+        int sy = edge.y/cell_size;
+        int by = edge.y%cell_size;
 
         if(edge.vertical)
         {
-            int ey = (edge.y+edge.length-1)/cell_h;
+            int ey = (edge.y+edge.length-1)/cell_size;
             bool border = bx == 0 && sx > 0;
 
             for(; sy <= ey; ++sy)
@@ -263,7 +275,7 @@ void rect_packer::recalc_edge_lookup()
         }
         else
         {
-            int ex = (edge.x+edge.length-1)/cell_w;
+            int ex = (edge.x+edge.length-1)/cell_size;
             bool border = by == 0 && sy > 0;
 
             for(; sx <= ex; ++sx)
@@ -296,7 +308,7 @@ int rect_packer::find_max_score(
             for(int y = edge.y; y < ey;)
             {
                 int skip = edge.vertical;
-                int score = score_rect(x, y, w, h, skip, tmp);
+                int score = score_rect(x, y, w, h, skip, ey, tmp);
                 if(score > best_score)
                 {
                     best_score = score;
@@ -318,7 +330,7 @@ int rect_packer::find_max_score(
             for(int x = edge.x; x < ex;)
             {
                 int skip = edge.vertical;
-                int score = score_rect(x, y, w, h, skip, tmp);
+                int score = score_rect(x, y, w, h, skip, ex, tmp);
                 if(score > best_score)
                 {
                     best_score = score;
@@ -335,17 +347,20 @@ int rect_packer::find_max_score(
 }
 
 int rect_packer::score_rect(
-    int x, int y, int w, int h, int& skip,
+    int x, int y, int w, int h, int& skip, int end,
     std::vector<free_edge*>& affected_edges
 ){
     affected_edges.clear();
 
     bool vertical = skip;
     int score = 0;
-    int sx = x/cell_w;
-    int sy = y/cell_h;
-    int ex = (x+w-1)/cell_w;
-    int ey = (y+h-1)/cell_h;
+    int sx = x/cell_size;
+    int sy = y/cell_size;
+    int ex = (x+w-1)/cell_size;
+    int ey = (y+h-1)/cell_size;
+
+    if(vertical) end = std::min(end, (ey+1)*cell_size);
+    else end = std::min(end, (ex+1)*cell_size);
 
     marker++;
     for(int cy = sy; cy <= ey; ++cy)
@@ -365,15 +380,41 @@ int rect_packer::score_rect(
                     else skip = edge->x + edge->length - x;
                     return 0;
                 }
+
                 if(escore > 0)
                 {
                     affected_edges.push_back(edge);
                     score += escore;
                 }
+
+                if(vertical)
+                {
+                    if(edge->vertical && edge->x == x + w && edge->y > y)
+                        end = std::min(end, edge->y);
+                    else if(
+                        !edge->vertical && edge->y > y + h &&
+                        edge->x < x + w && edge->x + edge->length > x
+                    ) end = std::min(end, edge->y - h);
+                }
+                else
+                {
+                    if(!edge->vertical && edge->y == y + h && edge->x > x)
+                        end = std::min(end, edge->x);
+                    else if(
+                        edge->vertical && edge->x > x + w &&
+                        edge->y < y + h && edge->y + edge->length > y
+                    ) end = std::min(end, edge->x - w);
+                }
             }
         }
     }
-    skip = 1;
+    /*
+    if(vertical) printf("Skip: %d\n", end-y);
+    else printf("Skip: %d\n", end-x);
+    */
+    //skip = 1;
+    if(vertical) skip = end - y;
+    else skip = end - x;
     return score;
 }
 

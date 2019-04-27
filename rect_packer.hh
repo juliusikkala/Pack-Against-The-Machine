@@ -28,6 +28,11 @@ public:
     void reset(int w, int h);
     void reset();
 
+    // -1 for automatic. This only affects the speed of the algorithm, because
+    // it adjusts the acceleration structure. The default is almost always good
+    // enough.
+    void set_cell_size(int tile_size = -1);
+
     // If open, cost approximation is adjusted such that packing after enlarge()
     // yields better results. Set this to true if you plan to enlarge(). If you
     // don't use enlarge(), this will cause packing results to be slightly
@@ -82,9 +87,9 @@ private:
     // skip has two purposes. When calling, set it equal to 'vertical' of the
     // edge the rect is tracking. 'skip' is set to the number of steps that must
     // be moved towards the up or right direction until the result can be
-    // better.
+    // better. 'end' is the end x or y coordinate in the currently tracked edge.
     int score_rect(
-        int x, int y, int w, int h, int& skip,
+        int x, int y, int w, int h, int& skip, int end,
         std::vector<free_edge*>& affected_edges
     );
 
@@ -102,8 +107,8 @@ private:
     std::vector<
         std::vector<free_edge*>
     > edge_lookup;
-    int cell_w, cell_h;
     int lookup_w, lookup_h;
+    int cell_size;
     bool open;
     unsigned marker;
 
