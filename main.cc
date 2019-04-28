@@ -1,5 +1,30 @@
+/*
+MIT License
+
+Copyright (c) 2019 Julius Ikkala
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
 #include "rect_packer.hh"
 #include "board.hh"
+#define STB_RECT_PACK_IMPLEMENTATION
+#include "stb_rect_pack.h"
 #include <SFML/Graphics.hpp>
 #include <cstdio>
 #include <memory>
@@ -268,6 +293,73 @@ int search_optimal_tile_size(
     return best_size;
 }
 
+void glyph_test(
+    float w_mean, float w_stddev,
+    float h_mean, float h_stddev,
+    float g_mean, float g_stddev,
+    unsigned canvas_w,
+    unsigned canvas_h,
+    unsigned seed = 0
+){
+    std::mt19937 rng(seed);
+    std::normal_distribution<float> w_dist(w_mean, w_stddev);
+    std::normal_distribution<float> h_dist(h_mean, h_stddev);
+    std::normal_distribution<float> g_dist(g_mean, g_stddev);
+
+    rect_packer packer(canvas_w, canvas_h, false);
+    std::vector<rect_packer::rect> my_rects;
+    bool my_full = false;
+    unsigned my_count = 0;
+
+    stbrp_context pack_ctx;
+    std::vector<stbrp_rect> stb_rects;
+    std::vector<stbrp_node> stb_nodes(canvas_w);
+    stbrp_init_target(&pack_ctx, canvas_w, canvas_h, stb_nodes.data(), stb_nodes.size());
+    bool stb_full = false;
+    unsigned stb_count = 0;
+
+    sf::Clock clock;
+    sf::Time stb_time;
+    sf::Time my_time;
+
+    printf("Start packing! (w: %f, h: %f, g: %f)\n", w_mean, h_mean, g_mean);
+    while(!my_full || !stb_full)
+    {
+        my_rects.clear();
+        stb_rects.clear();
+        int group_size = round(g_dist(rng));
+        if(group_size < 0) continue;
+        for(int i = 0; i < group_size; ++i)
+        {
+            int w = std::max((int)round(w_dist(rng)), 1);
+            int h = std::max((int)round(h_dist(rng)), 1);
+            my_rects.push_back({w, h});
+            stb_rects.push_back(
+                {0, (short unsigned)w, (short unsigned)h, 0, 0, 0}
+            );
+        }
+
+        clock.restart();
+        int my_added = packer.pack(my_rects.data(), my_rects.size(), true);
+        my_time += clock.restart();
+        if(my_added != group_size) my_full = true;
+        my_count += my_added;
+
+        clock.restart();
+        if(stbrp_pack_rects(&pack_ctx, stb_rects.data(), stb_rects.size()) == 0)
+            stb_full = true;
+        stb_time += clock.restart();
+        for(int i = 0; i < group_size; ++i)
+            stb_count += (stb_rects[i].was_packed ? 1 : 0);
+    }
+
+    printf(
+        "Packing over.\nMy: %u (%fs)\nSTB: %u (%fs)\nAdvantage: %f\n",
+        my_count, my_time.asSeconds(), stb_count, stb_time.asSeconds(),
+        my_count/(float)stb_count - 1.0f
+    );
+}
+
 int main()
 {
     unsigned window_size = 1920;
@@ -285,10 +377,13 @@ int main()
     bool at_once = true;
     bool allow_rotate = true;
 
+    /*
     for(unsigned i = 1; ; i *= 2)
     {
         measure_rate(i, i, i*2, 100, at_once, allow_rotate);
     }
+    */
+    glyph_test(50, 15, 80, 15, 2000, 0, 1024, 1024, time(nullptr));
 
     /*
     int prev_optimal = 1;
@@ -348,14 +443,14 @@ int main()
                 rects_queue.begin(),
                 rects_queue.end(),
                 [](const rect_packer::rect& a, const rect_packer::rect& b){
-                    return a.w + a.h > b.w + b.h;
+                    return std::max(a.w, a.h) > std::max(b.w, b.h);
                 }
             );
             std::sort(
                 rects.begin(),
                 rects.end(),
                 [](const board::rect& a, const board::rect& b){
-                    return a.w + a.h > b.w + b.h;
+                    return std::max(a.w, a.h) > std::max(b.w, b.h);
                 }
             );
         }
