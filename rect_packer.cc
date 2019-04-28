@@ -213,7 +213,9 @@ int rect_packer::pack(rect* rects, size_t count, bool allow_rotation)
     std::sort(
         rr.begin(),
         rr.end(),
-        [](const rect* a, const rect* b){return a->w + a->h > b->w + b->h;}
+        [](const rect* a, const rect* b){
+            return std::max(a->w, a->h) > std::max(b->w, b->h);
+        }
     );
 
     unsigned i = 0;
