@@ -127,7 +127,7 @@ void measure_rate(
             total_time += clock.getElapsedTime();
             for(rect_packer::rect& r: rects_queue)
             {
-                if(r.x != -1)
+                if(r.packed)
                     pack_board.place({0, r.x, r.y, r.w, r.h});
             }
         }
@@ -285,12 +285,10 @@ int main()
     bool at_once = true;
     bool allow_rotate = true;
 
-    /*
     for(unsigned i = 1; ; i *= 2)
     {
         measure_rate(i, i, i*2, 100, at_once, allow_rotate);
     }
-    */
 
     /*
     int prev_optimal = 1;
@@ -383,7 +381,7 @@ int main()
                 r.x = p.x;
                 r.y = p.y;
                 rotated = p.rotated;
-                success = r.x != -1;
+                success = p.packed;
             }
             else
             {

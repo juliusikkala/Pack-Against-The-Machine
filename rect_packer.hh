@@ -62,9 +62,12 @@ public:
         // Fill these in before calling.
         int w, h;
 
-        // These are set by pack(). If (-1, -1), the rect placing was
-        // unsuccessful.
-        int x = -1, y = -1;
+        // These are set by pack().
+        int x = 0, y = 0;
+
+        // This is set to true after being successfully packed.
+        bool packed = false;
+
         // If you don't allow rotation, this will always be set to false and you
         // don't have to care about it.
         bool rotated = false;
@@ -72,7 +75,8 @@ public:
 
     // This is not a very smart algorithm. It just sorts the inputs by 
     // perimeter. The results are surprisingly good, especially if rotation is
-    // enabled. The number of packed rects is returned.
+    // enabled. The number of packed rects is returned. If a rect is already
+    // packed, it is not packed again but does count towards the return value.
     int pack(rect* rects, size_t count, bool allow_rotation = false);
 
 private:

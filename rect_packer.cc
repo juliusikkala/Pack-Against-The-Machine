@@ -218,27 +218,29 @@ int rect_packer::pack(rect* rects, size_t count, bool allow_rotation)
         }
     );
 
-    unsigned i = 0;
     for(rect* r: rr)
     {
-        ++i;
+        if(r->packed)
+        {
+            packed++;
+            continue;
+        }
+
         if(allow_rotation)
         {
-            if(!pack_rotate(r->w, r->h, r->x, r->y, r->rotated))
+            if(pack_rotate(r->w, r->h, r->x, r->y, r->rotated))
             {
-                r->x = -1;
-                r->y = -1;
+                r->packed = true;
+                packed++;
             }
-            else packed++;
         }
         else
         {
-            if(!pack(r->w, r->h, r->x, r->y))
+            if(pack(r->w, r->h, r->x, r->y))
             {
-                r->x = -1;
-                r->y = -1;
+                r->packed = true;
+                packed++;
             }
-            else packed++;
         }
     }
     return packed;
