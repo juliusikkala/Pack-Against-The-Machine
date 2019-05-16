@@ -42,7 +42,7 @@ void shuffle(std::vector<T>& v)
 }
 
 std::vector<board::rect> generate_guillotine_set(
-    int w, int h, unsigned splits, bool quiet = false
+    unsigned w, unsigned h, unsigned splits, bool quiet = false
 ){
     if(!quiet)
         printf("Generating guillotine set for seed %d\n", initial_seed);
@@ -51,7 +51,7 @@ std::vector<board::rect> generate_guillotine_set(
 
     struct node
     {
-        int w, h;
+        unsigned w, h;
         bool vertical;
         std::vector<node> children;
 
@@ -74,24 +74,24 @@ std::vector<board::rect> generate_guillotine_set(
             if(vertical)
             {
                 std::uniform_int_distribution<> wdis(1,w-1);
-                int split = wdis(rng);
+                unsigned split = wdis(rng);
                 children.push_back({split, h, false,{}});
                 children.push_back({w-split, h, false,{}});
             }
             else
             {
                 std::uniform_int_distribution<> hdis(1,h-1);
-                int split = hdis(rng);
+                unsigned split = hdis(rng);
                 children.push_back({w, split, true,{}});
                 children.push_back({w, h-split, true,{}});
             }
             return true;
         }
 
-        void traverse(int x, int y, std::vector<board::rect>& rects)
+        void traverse(unsigned x, unsigned y, std::vector<board::rect>& rects)
         {
             if(children.empty())
-                rects.push_back({(int)rects.size(), x, y, w, h});
+                rects.push_back({(unsigned)rects.size(), x, y, w, h});
             else for(node& child: children)
             {
                 child.traverse(x, y, rects);
@@ -100,7 +100,7 @@ std::vector<board::rect> generate_guillotine_set(
             }
         }
     };
-    node root{w, h, bdis(rng), {}};
+    node root{w, h, (bool)bdis(rng), {}};
     for(unsigned i = 0; i < splits; ++i) root.split(rng);
     std::vector<board::rect> rects;
     root.traverse(0, 0, rects);
@@ -108,8 +108,8 @@ std::vector<board::rect> generate_guillotine_set(
 }
 
 void measure_rate(
-    int w,
-    int h,
+    unsigned w,
+    unsigned h,
     unsigned splits,
     unsigned tests,
     bool at_once,
@@ -168,7 +168,7 @@ void measure_rate(
                     {
                         if(rotated)
                         {
-                            int tmp = r.w;
+                            unsigned tmp = r.w;
                             r.w = r.h;
                             r.h = tmp;
                         }
@@ -201,96 +201,6 @@ void measure_rate(
     float time = total_time.asSeconds();
     printf("Time: %f\n", time);
     printf("Time per rect^2: %f\n", 1e10*time/pow((double)total_count, 2));
-}
-
-int search_optimal_tile_size(
-    int w,
-    int h,
-    unsigned splits,
-    float time_limit,
-    const std::vector<unsigned>& sizes,
-    bool at_once,
-    bool allow_rotation,
-    bool quiet = false
-){
-    rect_packer packer(w, h, false);
-    std::vector<board::rect> rects;
-    std::vector<rect_packer::rect> rects_queue;
-
-    sf::Clock clock;
-    sf::Time limit(sf::seconds(time_limit));
-
-    float best_finishes = 0;
-    unsigned best_size = 0;
-
-    if(!quiet) printf("Cell size search for %d, %d.\n", w, h);
-    for(unsigned cell_size: sizes)
-    {
-        float finishes = 0;
-        sf::Time total_time;
-
-        packer.set_cell_size(cell_size);
-
-        if(!quiet)
-        {
-            printf("Size %u: ", cell_size);
-            fflush(stdout);
-        }
-        
-        initial_seed = 0;
-        while(total_time < limit)
-        {
-            packer.reset();
-
-            rects = generate_guillotine_set(w, h, splits, true);
-            shuffle(rects);
-
-            sf::Time elapsed;
-            if(at_once)
-            {
-                rects_queue.clear();
-                rects_queue.reserve(rects.size());
-                for(unsigned i = 0; i < rects.size(); ++i)
-                    rects_queue.push_back({rects[i].w, rects[i].h});
-                clock.restart();
-                packer.pack(
-                    rects_queue.data(),
-                    rects_queue.size(),
-                    allow_rotation
-                );
-                elapsed = clock.getElapsedTime();
-            }
-            else
-            {
-                clock.restart();
-                for(board::rect& r: rects)
-                {
-                    if(allow_rotation)
-                    {
-                        bool rotated = false;
-                        packer.pack_rotate(r.w,r.h,r.x,r.y,rotated);
-                    }
-                    else packer.pack(r.w,r.h,r.x,r.y);
-                }
-                elapsed = clock.getElapsedTime();
-            }
-
-            if(total_time + elapsed < limit)
-                finishes += 1.0f;
-            else
-                finishes += (limit - total_time) / elapsed;
-            total_time += elapsed;
-        }
-
-        if(finishes >= best_finishes)
-        {
-            best_finishes = finishes;
-            best_size = cell_size;
-        }
-        if(!quiet) printf("%f\n", finishes);
-    }
-    if(!quiet) printf("Best cell size for %d, %d: %u\n", w, h, best_size);
-    return best_size;
 }
 
 void glyph_test(
@@ -331,8 +241,8 @@ void glyph_test(
         if(group_size < 0) continue;
         for(int i = 0; i < group_size; ++i)
         {
-            int w = std::max((int)round(w_dist(rng)), 1);
-            int h = std::max((int)round(h_dist(rng)), 1);
+            unsigned w = std::max((int)round(w_dist(rng)), 1);
+            unsigned h = std::max((int)round(h_dist(rng)), 1);
             my_rects.push_back({w, h});
             stb_rects.push_back(
                 {0, (short unsigned)w, (short unsigned)h, 0, 0, 0}
@@ -370,8 +280,8 @@ int main()
     if(!font.loadFromFile("Inconsolata/Inconsolata-Bold.ttf"))
         throw std::runtime_error("Failed to load Inconsolata");
 
-    unsigned w = 1024;
-    unsigned h = 1024;
+    unsigned w = 8;
+    unsigned h = 8;
     int splits = w * 2;
 
     bool at_once = true;
@@ -489,7 +399,7 @@ int main()
             {
                 if(rotated)
                 {
-                    int tmp = r.w;
+                    unsigned tmp = r.w;
                     r.w = r.h;
                     r.h = tmp;
                 }

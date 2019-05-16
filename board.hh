@@ -30,16 +30,16 @@ class rect_packer;
 class board
 {
 public:
-    board(int w, int h);
+    board(unsigned w, unsigned h);
 
-    void resize(int w, int h);
+    void resize(unsigned w, unsigned h);
     void reset();
 
     struct rect
     {
-        int id;
-        int x, y;
-        int w, h;
+        unsigned id;
+        unsigned x, y;
+        unsigned w, h;
     };
 
     void place(const rect& r);
@@ -48,8 +48,8 @@ public:
 
     void draw(
         sf::RenderWindow& win,
-        int x, int y,
-        int w, int h,
+        unsigned x, unsigned y,
+        unsigned w, unsigned h,
         bool draw_grid,
         sf::Font* number_font
     ) const;
@@ -57,12 +57,12 @@ public:
     void draw_debug_edges(
         sf::RenderWindow& win,
         rect_packer& pack,
-        int x, int y,
-        int w, int h
+        unsigned x, unsigned y,
+        unsigned w, unsigned h
     ) const;
 private:
-    int width, height;
-    int covered;
+    unsigned width, height;
+    unsigned covered;
     std::vector<rect> rects;
 };
 

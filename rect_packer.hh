@@ -25,6 +25,45 @@ SOFTWARE.
 #define RECT_PACKER_HH
 #include <vector>
 
+class line_map
+{
+public:
+    explicit line_map(size_t initial_lines = 0);
+
+    void reset(size_t lines);
+    void enlarge(size_t new_lines);
+
+    struct edge
+    {
+        unsigned pos, length;
+    };
+
+    using iterator = std::vector<edge>::iterator;
+    using const_iterator = std::vector<edge>::const_iterator;
+
+    int score(
+        unsigned x,
+        unsigned y,
+        unsigned w,
+        unsigned h,
+        bool move_direction,
+        bool scored_edge,
+        int& min_skip,
+        int& max_skip
+    ) const;
+    void insert(unsigned line, const edge& e, line_map& mask);
+
+    iterator operator[](unsigned line);
+    const_iterator operator[](unsigned line) const;
+    void clear();
+
+private:
+    void shift_lines(unsigned from_line, int offset) const;
+
+    mutable std::vector<edge> edges;
+    mutable std::vector<unsigned> lines;
+};
+
 // This algorithm works by finding such a placing for the rectangle that it's
 // edges are minimally exposed to the area left free. In other words, it
 // maximizes contact surface area with previously allocated space. This packing
@@ -53,23 +92,18 @@ class rect_packer
 public:
     // Constructor for rect_packer. w and h determine the size of the packing
     // area. See set_open() for details about open.
-    rect_packer(int w = 0, int h = 0, bool open = false);
+    rect_packer(unsigned w = 0, unsigned h = 0, bool open = false);
 
     // Grows the packing area without clearing already packed rects. w and h
     // represent the new size. Shrinking is not allowed, so if w or h are
     // smaller than the current width or height, they are clamped.
-    void enlarge(int w, int h);
+    void enlarge(unsigned w, unsigned h);
 
     // Clears the packer state, and changes the size of the packing area.
-    void reset(int w, int h);
+    void reset(unsigned w, unsigned h);
 
     // Clears the packer state.
     void reset();
-
-    // -1 for automatic. This only affects the speed of the algorithm, because
-    // it adjusts the acceleration structure. The default is almost always good
-    // enough.
-    void set_cell_size(int cell_size = -1);
 
     // If open, cost approximation is adjusted such that packing after enlarge()
     // yields better results. Set this to true if you plan to enlarge(). If you
@@ -82,19 +116,25 @@ public:
     // coordinates of the corner closest to your origin are written to x and y.
     // (that corner typically means the top-left corner in rasterizing 2D apps,
     // but this class doesn't actually care about coordinate directions)
-    bool pack(int w, int h, int& x, int& y);
+    bool pack(unsigned w, unsigned h, unsigned& x, unsigned& y);
 
     // pack(), but allows 90 degree rotation of the input rectangle. rotated is
     // set to true if that happened.
-    bool pack_rotate(int w, int h, int& x, int& y, bool& rotated);
+    bool pack_rotate(
+        unsigned w,
+        unsigned h,
+        unsigned& x,
+        unsigned& y,
+        bool& rotated
+    );
 
     struct rect
     {
         // Fill these in before calling.
-        int w, h;
+        unsigned w, h;
 
         // These are set by pack().
-        int x = 0, y = 0;
+        unsigned x = 0, y = 0;
 
         // This is set to true after being successfully packed.
         bool packed = false;
@@ -111,51 +151,19 @@ public:
     int pack(rect* rects, size_t count, bool allow_rotation = false);
 
 private:
-    struct free_edge
-    {
-        int x, y, length;
-        bool vertical, up_right_inside;
-        unsigned marker;
-    };
-
-    void recalc_edge_lookup();
-
-    int find_max_score(
-        int w, int h, int& x, int& y,
-        std::vector<free_edge*>& affected_edges
-    );
+    int find_max_score(unsigned w, unsigned h, unsigned& x, unsigned& y);
 
     // 0 if can't be placed here. Otherwise, number of blocked edges.
     // skip has two purposes. When calling, set it equal to 'vertical' of the
     // edge the rect is tracking. 'skip' is set to the number of steps that must
     // be moved towards the up or right direction until the result can be
-    // better. 'end' is the end x or y coordinate in the currently tracked edge.
-    int score_rect(
-        int x, int y, int w, int h, int& skip, int end,
-        std::vector<free_edge*>& affected_edges
-    );
+    // better.
+    int score_rect(unsigned x, unsigned y, unsigned w, unsigned h, int& skip);
+    void place_rect(unsigned x, unsigned y, unsigned w, unsigned h);
 
-    int score_rect_edge(int x, int y, int w, int h, free_edge* edge);
-
-    void place_rect(
-        int x, int y, int w, int h,
-        std::vector<free_edge*>& affected_edges
-    );
-
-    void edge_clip(const free_edge& mask, std::vector<free_edge>& clipped);
-
-    std::vector<free_edge> edges;
-    int canvas_w, canvas_h;
-    std::vector<
-        std::vector<free_edge*>
-    > edge_lookup;
-    int lookup_w, lookup_h;
-    int cell_size;
+    unsigned canvas_w, canvas_h;
+    line_map right, left, up, down;
     bool open;
-    unsigned marker;
-
-    // Stored here to avoid allocations.
-    std::vector<free_edge*> tmp;
 };
 
 #endif

@@ -24,6 +24,7 @@ SOFTWARE.
 #include "rect_packer.hh"
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <cmath>
 
 namespace
@@ -32,138 +33,283 @@ namespace
     {
         return std::max(std::min(x1 + w1, x2 + w2) - std::max(x1, x2), 0);
     }
-
-    int get_cell_size(int total_area)
-    {
-        // Largely empirical, I tested different cell sizes for different sizes
-        // of squares. This equation mostly follows the resulting values.
-        return ceil(pow(total_area, 1.0/6.0));
-    }
 }
 
-rect_packer::rect_packer(int w, int h, bool open)
-: canvas_w(w), canvas_h(h), cell_size(16), open(open), marker(0)
+line_map::line_map(size_t line_size)
+: lines(line_size+1, 0)
+{
+}
+
+void line_map::reset(size_t new_lines)
+{
+    lines.resize(new_lines+1);
+    clear();
+}
+
+void line_map::enlarge(size_t new_lines)
+{
+    lines.resize(new_lines+1, lines.back());
+}
+
+int line_map::score(
+    unsigned x,
+    unsigned y,
+    unsigned w,
+    unsigned h,
+    bool move_direction,
+    bool scored_edge,
+    int& min_skip,
+    int& max_skip
+) const
+{
+    unsigned score_line = x + (scored_edge ? w : 0);
+    int score = 0;
+    
+    unsigned i = lines[score_line];
+    unsigned end = lines[score_line+1];
+    unsigned top = y + h;
+
+    bool first_above = false;
+    // Calculate score
+    for(; i < end; ++i)
+    {
+        edge& e = edges[i];
+        unsigned et = e.pos + e.length;
+        if(et <= y || top <= e.pos) continue;
+        if(move_direction && !first_above && et > top && e.pos > y)
+        {
+            max_skip = std::min((int)e.pos - (int)y, max_skip);
+            first_above = true;
+        }
+        score += calc_overlap(y, h, edges[i].pos, edges[i].length);
+    }
+
+    // Check blockers & calculate skip.
+    unsigned line = x + 1;
+    i = lines[line];
+    unsigned line_end = lines[line+1];
+    bool blocked = false;
+
+    while(line < x + w)
+    {
+        for(; i < line_end; ++i)
+        {
+            edge& e = edges[i];
+            unsigned et = e.pos + e.length;
+            if(et <= y || top <= e.pos) continue;
+            if(move_direction) min_skip = std::max((int)(et - y), min_skip);
+            else min_skip = std::max((int)(line - x), min_skip);
+            blocked = true;
+        }
+        line++;
+        line_end = lines[line+1];
+    }
+
+    return blocked ? -1 : score;
+}
+
+void line_map::insert(unsigned line, const edge& e, line_map& mask)
+{
+    thread_local std::vector<edge> scratch;
+    scratch.clear();
+    scratch.push_back(e);
+    
+    unsigned i = mask.lines[line];
+    unsigned j = 0;
+    int offset = 0;
+
+    while(j < scratch.size() && i < mask.lines[line+1])
+    {
+        unsigned k = i + offset;
+        edge& ei = scratch[j];
+        edge& em = mask.edges[k];
+        unsigned ei_top = ei.pos + ei.length;
+        unsigned em_top = em.pos + em.length;
+
+        if(em_top <= ei.pos){i++; continue;} // Go to next mask
+        else if(ei_top <= em.pos){j++; continue;} // Go to next insert
+
+        // Overlap is guaranteed. (otherwise one edge would have been fully
+        // above another)
+
+        // Mask above/below leftovers
+        int ma_length = (int)em_top - (int)ei_top;
+        int mb_length = (int)ei.pos - (int)em.pos;
+
+        // Inserted above/below leftovers
+        int ia_length = -ma_length;
+        int ib_length = -mb_length;
+
+        // Handle insertion cases.
+        if(ia_length > 0 && ib_length > 0)
+        {
+            scratch[j].length = ib_length;
+            scratch.insert(
+                scratch.begin() + j + 1,
+                edge{(unsigned)em_top, (unsigned)ia_length}
+            );
+        }
+        else if(ia_length > 0)
+        {
+            scratch[j].pos = em_top;
+            scratch[j].length = ia_length;
+        }
+        else if(ib_length > 0)
+        {
+            scratch[j].length = ib_length;
+        }
+        else//(ib_length <= 0 && ia_length <= 0)
+        {
+            scratch.erase(scratch.begin()+j);
+        }
+
+        // Handle mask cases.
+        if(ma_length > 0 && mb_length > 0)
+        {
+            mask.edges[k].length = mb_length;
+            mask.edges.insert(
+                mask.edges.begin() + k + 1,
+                edge{(unsigned)ei_top, (unsigned)ma_length}
+            );
+            offset++;
+        }
+        else if(ma_length > 0)
+        {
+            mask.edges[k].pos = ei_top;
+            mask.edges[k].length = ma_length;
+        }
+        else if(mb_length > 0)
+        {
+            mask.edges[k].length = mb_length;
+        }
+        else//(mb_length <= 0 && ma_length <= 0)
+        {
+            mask.edges.erase(mask.edges.begin()+k);
+            offset--;
+            ++i;
+        }
+    }
+
+    if(offset != 0) mask.shift_lines(line+1, offset);
+
+    if(scratch.size() == 0) return;
+
+    auto scratch_begin = scratch.begin();
+    auto scratch_last = scratch.begin() + (scratch.size() - 1);
+    auto scratch_end = scratch.end();
+    auto edges_begin = edges.begin() + lines[line];
+    auto edges_end = edges.begin() + lines[line+1];
+
+    // Attempt to extend original below
+    while(edges_begin < edges_end)
+    {
+        unsigned old_top = edges_begin->pos + edges_begin->length;
+        if(old_top < scratch_begin->pos) edges_begin++;
+        else if(old_top == scratch_begin->pos)
+        {
+            edges_begin->length += scratch_begin->length;
+            edges_begin++;
+            scratch_begin++;
+            // TODO: Merge above too, this requires removal.
+            break;
+        }
+        else break;
+    }
+
+    if(scratch_begin <= scratch_last)
+    {
+        unsigned last_top = scratch_last->pos + scratch_last->length;
+        // Attempt to extend original above
+        for(auto it = edges_begin; it < edges_end; ++it)
+        {
+            if(it->pos > last_top) break;
+            if(it->pos == last_top)
+            {
+                it->pos -= scratch_last->length;
+                it->length += scratch_last->length;
+                scratch_end--;
+                break;
+            }
+        }
+    }
+
+    edges.insert(edges_begin, scratch_begin, scratch_end);
+    shift_lines(line+1, scratch_end - scratch_begin);
+}
+
+line_map::iterator line_map::operator[](unsigned line)
+{
+    return edges.begin() + lines[line];
+}
+
+line_map::const_iterator line_map::operator[](unsigned line) const
+{
+    return edges.begin() + lines[line];
+}
+
+void line_map::clear()
+{
+    edges.clear();
+    memset(lines.data(), 0, lines.size()*sizeof(lines[0]));
+}
+
+void line_map::shift_lines(unsigned from_line, int offset) const
+{
+    for(unsigned i = from_line; i < lines.size(); ++i)
+        lines[i] += offset;
+}
+
+rect_packer::rect_packer(unsigned w, unsigned h, bool open)
+: canvas_w(w), canvas_h(h), open(open)
 {
     reset(w, h);
 }
 
-void rect_packer::enlarge(int w, int h)
+void rect_packer::enlarge(unsigned w, unsigned h)
 {
-    tmp.clear();
+    w = std::max(w, canvas_w);
+    h = std::max(h, canvas_h);
 
-    std::vector<free_edge> top_edges, right_edges;
+    right.enlarge(w+1);
+    left.enlarge(w+1);
+    up.enlarge(h+1);
+    down.enlarge(h+1);
 
-    w = std::max(canvas_w, w);
-    h = std::max(canvas_h, h);
+    up.insert(canvas_h, {0, canvas_w}, down);
+    right.insert(canvas_w, {0, canvas_h}, left);
 
-    marker++;
-    if(h > canvas_h)
-    {
-        top_edges.push_back({0, canvas_h, canvas_w, false, true, marker});
+    right.insert(0, {canvas_h, h - canvas_h}, left);
+    left.insert(w, {0, h}, right);
+    up.insert(0, {canvas_w, w - canvas_w}, down);
+    down.insert(h, {0, w}, up);
 
-        for(int i = 0; i < lookup_w; ++i)
-        {
-            auto& cell = edge_lookup[(lookup_h-1) * lookup_w + i];
-            for(free_edge* edge: cell)
-            {
-                if(
-                    edge->vertical ||
-                    edge->y != canvas_h ||
-                    edge->marker == marker
-                ) continue;
-                edge->marker = marker;
-                edge_clip(*edge, top_edges);
-                tmp.push_back(edge);
-            }
-        }
-
-        top_edges.push_back({0, canvas_h, h-canvas_h, true, true, marker});
-        top_edges.push_back({0, h, w, false, false, marker});
-        if(w <= canvas_w)
-            top_edges.push_back({w, canvas_h, h-canvas_h, true, false, marker});
-    }
-
-    if(w > canvas_w)
-    {
-        right_edges.push_back({canvas_w, 0, canvas_h, true, true, marker});
-
-        for(int i = 0; i < lookup_h; ++i)
-        {
-            auto& cell = edge_lookup[i * lookup_w + lookup_w - 1];
-            for(free_edge* edge: cell)
-            {
-                if(
-                    !edge->vertical ||
-                    edge->x != canvas_w ||
-                    edge->marker == marker
-                ) continue;
-                edge->marker = marker;
-                edge_clip(*edge, right_edges);
-                tmp.push_back(edge);
-            }
-        }
-
-        right_edges.push_back({canvas_w, 0, w-canvas_w, false, true, marker});
-        right_edges.push_back({w, 0, h, true, false, marker});
-        if(h <= canvas_h)
-            right_edges.push_back(
-                {canvas_w, h, w-canvas_w, false, false, marker}
-            );
-    }
-
-    std::sort(tmp.begin(), tmp.end());
-    free_edge* base = edges.data();
-    for(free_edge* edge: tmp)
-    {
-        edges.erase(edges.begin()+(edge-base));
-        base++;
-    }
-
-    edges.insert(edges.end(), top_edges.begin(), top_edges.end());
-    edges.insert(edges.end(), right_edges.begin(), right_edges.end());
-
-    canvas_h = h;
     canvas_w = w;
-
-    set_cell_size();
+    canvas_h = h;
 }
 
-void rect_packer::reset(int w, int h)
+void rect_packer::reset(unsigned w, unsigned h)
 {
     canvas_w = w;
     canvas_h = h;
-    lookup_w = (canvas_w+cell_size-1)/cell_size;
-    lookup_h = (canvas_h+cell_size-1)/cell_size;
+
+    right.reset(w+1);
+    left.reset(w+1);
+    up.reset(h+1);
+    down.reset(h+1);
     reset();
 }
 
 void rect_packer::reset()
 {
-    edge_lookup.resize(lookup_w*lookup_h);
-    for(auto& cell: edge_lookup)
-        cell.clear();
+    left.clear();
+    right.clear();
+    up.clear();
+    down.clear();
 
-    edges.clear();
-    edges.push_back({0, 0, canvas_h, true, true, marker});
-    edges.push_back({0, 0, canvas_w, false, true, marker});
-    edges.push_back({canvas_w, 0, canvas_h, true, false, marker});
-    edges.push_back({0, canvas_h, canvas_w, false, false, marker});
-    recalc_edge_lookup();
-}
-
-void rect_packer::set_cell_size(int cell_size)
-{
-    if(cell_size < 1) cell_size = get_cell_size(canvas_w*canvas_h);
-    this->cell_size = cell_size;
-
-    lookup_h = (canvas_h+cell_size-1)/cell_size;
-    lookup_w = (canvas_w+cell_size-1)/cell_size;
-
-    edge_lookup.resize(lookup_w*lookup_h);
-    for(auto& cell: edge_lookup)
-        cell.clear();
-
-    recalc_edge_lookup();
+    right.insert(0, {0, canvas_h}, left);
+    left.insert(canvas_w, {0, canvas_h}, right);
+    up.insert(0, {0, canvas_w}, down);
+    down.insert(canvas_h, {0, canvas_w}, up);
 }
 
 void rect_packer::set_open(bool open)
@@ -171,23 +317,26 @@ void rect_packer::set_open(bool open)
     this->open = open;
 }
 
-bool rect_packer::pack(int w, int h, int& x, int& y)
+bool rect_packer::pack(unsigned w, unsigned h, unsigned& x, unsigned& y)
 {
-    std::vector<free_edge*> affected;
-
     int score = 0;
-    score = find_max_score(w, h, x, y, affected);
+    score = find_max_score(w, h, x, y);
 
     // No fit, fail.
-    if(score == 0) return false;
+    if(score <= 0) return false;
 
-    place_rect(x, y, w, h, affected);
+    place_rect(x, y, w, h);
 
     return true;
 }
 
-bool rect_packer::pack_rotate(int w, int h, int& x, int& y, bool& rotated)
-{
+bool rect_packer::pack_rotate(
+    unsigned w,
+    unsigned h,
+    unsigned& x,
+    unsigned& y,
+    bool& rotated
+){
     // Fast path if we rotation is meaningless.
     if(w == h)
     {
@@ -196,26 +345,25 @@ bool rect_packer::pack_rotate(int w, int h, int& x, int& y, bool& rotated)
     }
 
     // Try both orientations.
-    int rot_x, rot_y;
-    std::vector<free_edge*> affected, rot_affected;
+    unsigned rot_x, rot_y;
     int score = 0;
     int rot_score = 0;
 
-    score = find_max_score(w, h, x, y, affected);
-    rot_score = find_max_score(h, w, rot_x, rot_y, rot_affected);
-    if(score == 0 && rot_score == 0) return false;
+    score = find_max_score(w, h, x, y);
+    rot_score = find_max_score(h, w, rot_x, rot_y);
+    if(score <= 0 && rot_score <= 0) return false;
 
     // Pick better orientation, preferring non-rotated version.
     if(score >= rot_score)
     {
         rotated = false;
-        place_rect(x, y, w, h, affected);
+        place_rect(x, y, w, h);
     }
     else
     {
         rotated = true;
         x = rot_x; y = rot_y;
-        place_rect(x, y, h, w, rot_affected);
+        place_rect(x, y, h, w);
     }
 
     return true;
@@ -269,321 +417,142 @@ int rect_packer::pack(rect* rects, size_t count, bool allow_rotation)
     return packed;
 }
 
-void rect_packer::recalc_edge_lookup()
-{
-    marker = 0;
-
-    // Clear lookup
-    for(auto& cell: edge_lookup)
-        cell.clear();
-
-    // Rasterize edges on the lookup
-    for(auto& edge: edges)
-    {
-        edge.marker = 0;
-
-        int sx = edge.x/cell_size;
-        int bx = edge.x%cell_size;
-        int sy = edge.y/cell_size;
-        int by = edge.y%cell_size;
-
-        if(edge.vertical)
-        {
-            int ey = (edge.y+edge.length-1)/cell_size;
-            bool border = bx == 0 && sx > 0;
-
-            for(; sy <= ey; ++sy)
-            {
-                if(sx < lookup_w)
-                    edge_lookup[sy * lookup_w + sx].push_back(&edge);
-                if(border)
-                    edge_lookup[sy * lookup_w + sx-1].push_back(&edge);
-            }
-        }
-        else
-        {
-            int ex = (edge.x+edge.length-1)/cell_size;
-            bool border = by == 0 && sy > 0;
-
-            for(; sx <= ex; ++sx)
-            {
-                if(sy < lookup_h)
-                    edge_lookup[sy * lookup_w + sx].push_back(&edge);
-                if(border)
-                    edge_lookup[(sy-1) * lookup_w + sx].push_back(&edge);
-            }
-        }
-    }
-}
-
 int rect_packer::find_max_score(
-    int w, int h, int& best_x, int& best_y,
-    std::vector<free_edge*>& best_affected_edges
+    unsigned w,
+    unsigned h,
+    unsigned& best_x,
+    unsigned& best_y
 ){
     int best_score = 0;
-    int ideal = (w + h) * 2;
-    for(free_edge& edge: edges)
+
+    // Vertical scan
+    auto right_it = right[0];
+    auto left_it = left[w];
+    unsigned tested_positions = 0;
+    for(unsigned x = 0; x <= canvas_w - w; ++x)
     {
-        if(edge.vertical)
+        auto right_line_end = right[x+1];
+        auto left_line_end = left[x+w+1];
+        unsigned y = 0;
+
+        while(true)
         {
-            int x = edge.x;
-            if(!edge.up_right_inside) x -= w;
-            if(x < 0 || x + w > canvas_w) continue;
-
-            int ey = std::min(edge.y + edge.length, canvas_h - h + 1);
-
-            for(int y = edge.y; y < ey;)
+            unsigned min_y = canvas_h + h;
+            while(left_it != left_line_end)
             {
-                int skip = edge.vertical;
-                int score = score_rect(x, y, w, h, skip, ey, tmp);
-                if(score > best_score)
+                unsigned left_top = left_it->pos + left_it->length;
+                if(left_top > y)
                 {
-                    best_score = score;
-                    best_x = x;
-                    best_y = y;
-                    best_affected_edges = tmp;
+                    min_y = left_it->pos;
+                    break;
                 }
-                y += skip;
+                ++left_it;
             }
+            while(right_it != right_line_end)
+            {
+                unsigned right_top = right_it->pos + right_it->length;
+                if(right_top > y)
+                {
+                    min_y = std::min(min_y, right_it->pos);
+                    break;
+                }
+                ++right_it;
+            }
+
+            y = std::max((int)y, (int)min_y - (int)h + 1);
+            if(y + h > canvas_h) break;
+
+            int skip = 1;
+            int score = score_rect(x, y, w, h, skip);
+            tested_positions++;
+            if(score > best_score)
+            {
+                best_score = score;
+                best_x = x;
+                best_y = y;
+            }
+            y += skip;
         }
-        else
+        left_it = left_line_end;
+        right_it = right_line_end;
+    }
+
+    // Horizontal scan
+    auto up_it = up[0];
+    auto down_it = down[h];
+    for(unsigned y = 0; y <= canvas_h - h; ++y)
+    {
+        auto up_line_end = up[y+1];
+        auto down_line_end = down[y+h+1];
+        unsigned x = 0;
+
+        while(true)
         {
-            int y = edge.y;
-            if(!edge.up_right_inside) y -= h;
-            if(y < 0 || y + h > canvas_h) continue;
-
-            int ex = std::min(edge.x + edge.length, canvas_w - w + 1);
-
-            for(int x = edge.x; x < ex;)
+            unsigned min_x = canvas_w + w;
+            while(down_it != down_line_end)
             {
-                int skip = edge.vertical;
-                int score = score_rect(x, y, w, h, skip, ex, tmp);
-                if(score > best_score)
+                unsigned down_top = down_it->pos + down_it->length;
+                if(down_top > x)
                 {
-                    best_score = score;
-                    best_x = x;
-                    best_y = y;
-                    best_affected_edges = tmp;
+                    min_x = down_it->pos;
+                    break;
                 }
-                x += skip;
+                ++down_it;
             }
+            while(up_it != up_line_end)
+            {
+                unsigned up_top = up_it->pos + up_it->length;
+                if(up_top > x)
+                {
+                    min_x = std::min(min_x, up_it->pos);
+                    break;
+                }
+                ++up_it;
+            }
+
+            x = std::max((int)x, (int)min_x - (int)w + 1);
+            if(x + w > canvas_w) break;
+
+            int skip = 0;
+            int score = score_rect(x, y, w, h, skip);
+            tested_positions++;
+            if(score > best_score)
+            {
+                best_score = score;
+                best_x = x;
+                best_y = y;
+            }
+            x += skip;
         }
-        if(best_score == ideal) break;
+        down_it = down_line_end;
+        up_it = up_line_end;
     }
     return best_score;
 }
 
 int rect_packer::score_rect(
-    int x, int y, int w, int h, int& skip, int end,
-    std::vector<free_edge*>& affected_edges
+    unsigned x,
+    unsigned y,
+    unsigned w,
+    unsigned h,
+    int& skip
 ){
-    affected_edges.clear();
-
     bool vertical = skip;
-    int score = 0;
-    int sx = x/cell_size;
-    int sy = y/cell_size;
-    int ex = (x+w-1)/cell_size;
-    int ey = (y+h-1)/cell_size;
-
-    if(vertical) end = std::min(end, (ey+1)*cell_size);
-    else end = std::min(end, (ex+1)*cell_size);
-
-    marker++;
-    for(int cy = sy; cy <= ey; ++cy)
-    {
-        for(int cx = sx; cx <= ex; ++cx)
-        {
-            auto& cell = edge_lookup[cy * lookup_w + cx];
-            for(free_edge* edge: cell)
-            {
-                if(edge->marker == marker) continue;
-                edge->marker = marker;
-
-                int escore = score_rect_edge(x, y, w, h, edge); 
-                if(escore == -1)
-                {
-                    if(vertical) skip = edge->y + edge->length - y;
-                    else skip = edge->x + edge->length - x;
-                    return 0;
-                }
-
-                if(escore > 0)
-                {
-                    affected_edges.push_back(edge);
-                    score += escore;
-                }
-
-                if(vertical)
-                {
-                    if(edge->vertical && edge->x == x + w && edge->y > y)
-                        end = std::min(end, edge->y);
-                    else if(
-                        !edge->vertical && edge->y > y + h &&
-                        edge->x < x + w && edge->x + edge->length > x
-                    ) end = std::min(end, edge->y - h);
-                }
-                else
-                {
-                    if(!edge->vertical && edge->y == y + h && edge->x > x)
-                        end = std::min(end, edge->x);
-                    else if(
-                        edge->vertical && edge->x > x + w &&
-                        edge->y < y + h && edge->y + edge->length > y
-                    ) end = std::min(end, edge->x - w);
-                }
-            }
-        }
-    }
-    /*
-    if(vertical) printf("Skip: %d\n", end-y);
-    else printf("Skip: %d\n", end-x);
-    */
-    //skip = 1;
-    if(vertical) skip = end - y;
-    else skip = end - x;
-    return score;
+    int min_skip = 1;
+    int max_skip = vertical ? canvas_h - y - h : canvas_w - x - w;
+    int rscore = right.score(x, y, w, h, vertical, false, min_skip, max_skip);
+    int lscore = left.score(x, y, w, h, vertical, true, min_skip, max_skip);
+    int uscore = up.score(y, x, h, w, !vertical, false, min_skip, max_skip);
+    int dscore = down.score(y, x, h, w, !vertical, true, min_skip, max_skip);
+    skip = std::max(min_skip, max_skip);
+    if(rscore < 0 || lscore < 0 || uscore < 0 || dscore < 0) return 0;
+    return rscore + lscore + uscore + dscore;
 }
 
-int rect_packer::score_rect_edge(
-    int x, int y, int w, int h, free_edge* edge
-){
-    if(edge->vertical)
-    {
-        int score = calc_overlap(y, h, edge->y, edge->length);
-        if(edge->x > x && edge->x < x + w && score > 0) return -1;
-        if(open && edge->x == canvas_w) return 0;
-        if(x == edge->x || x + w == edge->x) return score;
-    }
-    else
-    {
-        int score = calc_overlap(x, w, edge->x, edge->length);
-        if(edge->y > y && edge->y < y + h && score > 0) return -1;
-        if(open && edge->y == canvas_h) return 0;
-        if(y == edge->y || y + h == edge->y) return score;
-    }
-    return -2;
-}
-
-// This function doesn't have to be super optimized in terms of allocations,
-// it's run only once when packing a rect.
-void rect_packer::place_rect(
-    int x, int y, int w, int h,
-    std::vector<free_edge*>& affected_edges
-){
-    std::vector<free_edge> new_edges;
-    std::vector<free_edge*> delete_edges;
-    std::vector<free_edge> vert_rect_edges;
-    std::vector<free_edge> hori_rect_edges;
-
-    vert_rect_edges.push_back({x,y,h,true,false,marker});
-    vert_rect_edges.push_back({x+w,y,h,true,true,marker});
-
-    hori_rect_edges.push_back({x,y,w,false,false,marker});
-    hori_rect_edges.push_back({x,y+h,w,false,true,marker});
-
-    for(free_edge* edge: affected_edges)
-    {
-        free_edge a, b;
-
-        if(edge->vertical)
-        {
-            a = {
-                edge->x, edge->y, y - edge->y,
-                true, edge->up_right_inside, marker
-            };
-            b = {
-                edge->x, y + h, edge->y + edge->length - y - h,
-                true, edge->up_right_inside, marker
-            };
-            edge_clip(*edge, vert_rect_edges);
-        }
-        else
-        {
-            a = {
-                edge->x, edge->y, x - edge->x,
-                false, edge->up_right_inside, marker
-            };
-            b = {
-                x + w, edge->y, edge->x + edge->length - x - w,
-                false, edge->up_right_inside, marker
-            };
-            edge_clip(*edge, hori_rect_edges);
-        }
-
-        if(a.length > 0 && b.length > 0)
-        {
-            *edge = a;
-            new_edges.push_back(b);
-        }
-        else if(a.length > 0) *edge = a;
-        else if(b.length > 0) *edge = b;
-        else delete_edges.push_back(edge);
-    }
-
-    std::sort(delete_edges.begin(), delete_edges.end());
-    free_edge* base = edges.data();
-    for(free_edge* edge: delete_edges)
-    {
-        edges.erase(edges.begin()+(edge-base));
-        base++;
-    }
-
-    edges.insert(edges.end(), new_edges.begin(), new_edges.end());
-    edges.insert(edges.end(), vert_rect_edges.begin(), vert_rect_edges.end());
-    edges.insert(edges.end(), hori_rect_edges.begin(), hori_rect_edges.end());
-
-    recalc_edge_lookup();
-}
-
-void rect_packer::edge_clip(
-    const free_edge& mask,
-    std::vector<free_edge>& clipped
-){
-    for(unsigned i = 0; i < clipped.size(); ++i)
-    {
-        free_edge* edge = &clipped[i];
-
-        free_edge a, b;
-        if(mask.vertical)
-        {
-            if(mask.x != edge->x) continue;
-            a = {
-                edge->x, edge->y, std::min(mask.y - edge->y, edge->length),
-                true, edge->up_right_inside, marker
-            };
-            b = {
-                edge->x, std::max(mask.y + mask.length, edge->y),
-                edge->y + edge->length,
-                true, edge->up_right_inside, marker
-            };
-            b.length -= b.y;
-        }
-        else
-        {
-            if(mask.y != edge->y) continue;
-            a = {
-                edge->x, edge->y, std::min(mask.x - edge->x, edge->length),
-                false, edge->up_right_inside, marker
-            };
-            b = {
-                std::max(mask.x + mask.length, edge->x), edge->y,
-                edge->x + edge->length,
-                false, edge->up_right_inside, marker
-            };
-            b.length -= b.x;
-        }
-
-        if(a.length > 0 && b.length > 0)
-        {
-            *edge = a;
-            clipped.push_back(b);
-        }
-        else if(a.length > 0) *edge = a;
-        else if(b.length > 0) *edge = b;
-        else {
-            clipped.erase(clipped.begin()+i);
-            --i;
-        }
-    }
+void rect_packer::place_rect(unsigned x, unsigned y, unsigned w, unsigned h)
+{
+    right.insert(x+w, {y, h}, left);
+    left.insert(x, {y, h}, right);
+    up.insert(y+h, {x, w}, down);
+    down.insert(y, {x, w}, up);
 }

@@ -78,12 +78,12 @@ unsigned generate_color(int id, bool bounds)
 
 }
 
-board::board(int w, int h)
+board::board(unsigned w, unsigned h)
 : width(w), height(h), covered(0)
 {
 }
 
-void board::resize(int w, int h)
+void board::resize(unsigned w, unsigned h)
 {
     width = w;
     height = h;
@@ -104,7 +104,7 @@ void board::place(const rect& r)
 bool board::can_place(const rect& r) const
 {
     // Check bounds
-    if(r.x < 0 || r.y < 0 || r.x + r.w > width || r.y + r.h > height)
+    if(r.x + r.w > width || r.y + r.h > height)
         return false;
 
     // Check other rects
@@ -122,8 +122,8 @@ double board::coverage() const
 
 void board::draw(
     sf::RenderWindow& win,
-    int x, int y,
-    int w, int h,
+    unsigned x, unsigned y,
+    unsigned w, unsigned h,
     bool draw_grid,
     sf::Font* number_font
 ) const
@@ -146,9 +146,9 @@ void board::draw(
     // Draw grid if asked to
     if(draw_grid)
     {
-        for(int gy = 1; gy < height; ++gy)
+        for(unsigned gy = 1; gy < height; ++gy)
         {
-            int sy = y + gy * h / height;
+            unsigned sy = y + gy * h / height;
             sf::Vertex grid_line[] = {
                 sf::Vertex(sf::Vector2f(x, sy), bounds_color),
                 sf::Vertex(sf::Vector2f(x + w, sy), bounds_color),
@@ -156,9 +156,9 @@ void board::draw(
             win.draw(grid_line, 2, sf::Lines);
         }
 
-        for(int gx = 1; gx < width; ++gx)
+        for(unsigned gx = 1; gx < width; ++gx)
         {
-            int sx = x + gx * w / width;
+            unsigned sx = x + gx * w / width;
             sf::Vertex grid_line[] = {
                 sf::Vertex(sf::Vector2f(sx, y), bounds_color),
                 sf::Vertex(sf::Vector2f(sx, y + h), bounds_color),
