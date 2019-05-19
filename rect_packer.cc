@@ -51,63 +51,6 @@ void line_map::enlarge(size_t new_lines)
     lines.resize(new_lines+1, lines.back());
 }
 
-int line_map::score(
-    unsigned x,
-    unsigned y,
-    unsigned w,
-    unsigned h,
-    bool move_direction,
-    bool scored_edge,
-    int& min_skip,
-    int& max_skip
-) const
-{
-    unsigned score_line = x + (scored_edge ? w : 0);
-    int score = 0;
-    
-    unsigned i = lines[score_line];
-    unsigned end = lines[score_line+1];
-    unsigned top = y + h;
-
-    bool first_above = false;
-    // Calculate score
-    for(; i < end; ++i)
-    {
-        edge& e = edges[i];
-        unsigned et = e.pos + e.length;
-        if(et <= y || top <= e.pos) continue;
-        if(move_direction && !first_above && et > top && e.pos > y)
-        {
-            max_skip = std::min((int)e.pos - (int)y, max_skip);
-            first_above = true;
-        }
-        score += calc_overlap(y, h, edges[i].pos, edges[i].length);
-    }
-
-    // Check blockers & calculate skip.
-    unsigned line = x + 1;
-    i = lines[line];
-    unsigned line_end = lines[line+1];
-    bool blocked = false;
-
-    while(line < x + w)
-    {
-        for(; i < line_end; ++i)
-        {
-            edge& e = edges[i];
-            unsigned et = e.pos + e.length;
-            if(et <= y || top <= e.pos) continue;
-            if(move_direction) min_skip = std::max((int)(et - y), min_skip);
-            else min_skip = std::max((int)(line - x), min_skip);
-            blocked = true;
-        }
-        line++;
-        line_end = lines[line+1];
-    }
-
-    return blocked ? -1 : score;
-}
-
 void line_map::insert(unsigned line, const edge& e, line_map& mask)
 {
     thread_local std::vector<edge> scratch;
@@ -425,128 +368,198 @@ int rect_packer::find_max_score(
 ){
     int best_score = 0;
 
-    // Vertical scan
-    auto right_it = right[0];
-    auto left_it = left[w];
-    unsigned tested_positions = 0;
-    for(unsigned x = 0; x <= canvas_w - w; ++x)
+    unsigned fast_tracks = 0;
+
+    // Vertical scans
+    for(unsigned x = 0; x + w <= canvas_w; ++x)
     {
-        auto right_line_end = right[x+1];
-        auto left_line_end = left[x+w+1];
-        unsigned y = 0;
-
-        while(true)
+        int y = scan_rect(x, canvas_h, w, h, best_score, right, left, up, down);
+        if(y >= 0)
         {
-            unsigned min_y = canvas_h + h;
-            while(left_it != left_line_end)
-            {
-                unsigned left_top = left_it->pos + left_it->length;
-                if(left_top > y)
-                {
-                    min_y = left_it->pos;
-                    break;
-                }
-                ++left_it;
-            }
-            while(right_it != right_line_end)
-            {
-                unsigned right_top = right_it->pos + right_it->length;
-                if(right_top > y)
-                {
-                    min_y = std::min(min_y, right_it->pos);
-                    break;
-                }
-                ++right_it;
-            }
-
-            y = std::max((int)y, (int)min_y - (int)h + 1);
-            if(y + h > canvas_h) break;
-
-            int skip = 1;
-            int score = score_rect(x, y, w, h, skip);
-            tested_positions++;
-            if(score > best_score)
-            {
-                best_score = score;
-                best_x = x;
-                best_y = y;
-            }
-            y += skip;
+            best_x = x;
+            best_y = y;
         }
-        left_it = left_line_end;
-        right_it = right_line_end;
+        if(y == -2) fast_tracks++;
     }
 
-    // Horizontal scan
-    auto up_it = up[0];
-    auto down_it = down[h];
-    for(unsigned y = 0; y <= canvas_h - h; ++y)
+    // Horizontal scans
+    for(unsigned y = 0; y + h <= canvas_h; ++y)
     {
-        auto up_line_end = up[y+1];
-        auto down_line_end = down[y+h+1];
-        unsigned x = 0;
-
-        while(true)
+        int x = scan_rect(y, canvas_w, h, w, best_score, up, down, right, left);
+        if(x >= 0)
         {
-            unsigned min_x = canvas_w + w;
-            while(down_it != down_line_end)
-            {
-                unsigned down_top = down_it->pos + down_it->length;
-                if(down_top > x)
-                {
-                    min_x = down_it->pos;
-                    break;
-                }
-                ++down_it;
-            }
-            while(up_it != up_line_end)
-            {
-                unsigned up_top = up_it->pos + up_it->length;
-                if(up_top > x)
-                {
-                    min_x = std::min(min_x, up_it->pos);
-                    break;
-                }
-                ++up_it;
-            }
-
-            x = std::max((int)x, (int)min_x - (int)w + 1);
-            if(x + w > canvas_w) break;
-
-            int skip = 0;
-            int score = score_rect(x, y, w, h, skip);
-            tested_positions++;
-            if(score > best_score)
-            {
-                best_score = score;
-                best_x = x;
-                best_y = y;
-            }
-            x += skip;
+            best_x = x;
+            best_y = y;
         }
-        down_it = down_line_end;
-        up_it = up_line_end;
+        if(x == -2) fast_tracks++;
     }
+
     return best_score;
 }
 
-int rect_packer::score_rect(
-    unsigned x,
-    unsigned y,
-    unsigned w,
-    unsigned h,
-    int& skip
+int rect_packer::scan_rect(
+    unsigned x, unsigned max_y_top, unsigned w, unsigned h, int& best_score,
+    const line_map& vright, const line_map& vleft,
+    const line_map& hup, const line_map& hdown
 ){
-    bool vertical = skip;
-    int min_skip = 1;
-    int max_skip = vertical ? canvas_h - y - h : canvas_w - x - w;
-    int rscore = right.score(x, y, w, h, vertical, false, min_skip, max_skip);
-    int lscore = left.score(x, y, w, h, vertical, true, min_skip, max_skip);
-    int uscore = up.score(y, x, h, w, !vertical, false, min_skip, max_skip);
-    int dscore = down.score(y, x, h, w, !vertical, true, min_skip, max_skip);
-    skip = std::max(min_skip, max_skip);
-    if(rscore < 0 || lscore < 0 || uscore < 0 || dscore < 0) return 0;
-    return rscore + lscore + uscore + dscore;
+    auto left_start = vright[x], left_end = vright[x+1];
+    auto right_start = vleft[x+w], right_end = vleft[x+w+1];
+
+    // If no left or right edge, there can't be a good position along this
+    // line.
+    if(left_start == left_end && right_start == right_end) return -2;
+
+    struct scan_state
+    {
+        line_map::const_iterator start;
+        line_map::const_iterator end;
+    };
+
+    thread_local std::vector<scan_state> vblock;
+    vblock.clear();
+
+    // Init vertical blockers
+    for(unsigned ix = x + 1; ix < x + w; ++ix)
+    {
+        auto start = vright[ix], end = vright[ix+1];
+        if(start != end) vblock.push_back({start, end});
+    }
+    for(unsigned ix = x + 1; ix < x + w; ++ix)
+    {
+        auto start = vleft[ix], end = vleft[ix+1];
+        if(start != end) vblock.push_back({start, end});
+    }
+
+    // Start scanning y-axis for positions
+    unsigned y = 0;
+    int best_y = -1;
+    unsigned max_y = max_y_top - h;
+    unsigned hblock_y = 0;
+
+    while(y <= max_y)
+    {
+        unsigned top = y + h;
+        unsigned populated_y = max_y;
+
+        // Calculate score first, so that we can skip blocker checking if it
+        // can't be the best score.
+        int score = 0;
+
+        // Vertical scoring
+        // Left side of rectangle
+        while(
+            left_start < left_end &&
+            left_start->pos + left_start->length <= y
+        ) ++left_start;
+        if(left_start != left_end)
+        {
+            if(left_start->pos < top) populated_y = y;
+            else populated_y = std::min(populated_y, left_start->pos - h);
+            auto vstart = left_start, vend = left_end;
+            for(; vstart < vend && vstart->pos < top; ++vstart)
+                score += calc_overlap(y, h, vstart->pos, vstart->length);
+        }
+
+        // Right side of rectangle
+        while(
+            right_start < right_end &&
+            right_start->pos + right_start->length <= y
+        ) ++right_start;
+        if(right_start != right_end)
+        {
+            if(right_start->pos < top) populated_y = y;
+            else populated_y = std::min(populated_y, right_start->pos - h);
+            auto vstart = right_start, vend = right_end;
+            for(; vstart < vend && vstart->pos < top; ++vstart)
+                score += calc_overlap(y, h, vstart->pos, vstart->length);
+        }
+
+        if(populated_y != y)
+        {
+            y = populated_y + 1;
+            continue;
+        }
+
+        // Horizontal scoring
+        // Bottom side of rectangle
+        auto hstart = hup[y], hend = hup[y+1];
+        for(; hstart < hend && hstart->pos < x + w; ++hstart)
+        {
+            if(hstart->pos + hstart->length <= x) continue;
+            score += calc_overlap(x, w, hstart->pos, hstart->length);
+        }
+        // Top side of rectangle
+        hstart = hdown[y+h], hend = hdown[y+h+1];
+        for(; hstart < hend && hstart->pos < x + w; ++hstart)
+        {
+            if(hstart->pos + hstart->length <= x) continue;
+            score += calc_overlap(x, w, hstart->pos, hstart->length);
+        }
+
+        if(score <= best_score)
+        {
+            y++;
+            continue;
+        }
+
+        unsigned blocked_y = y;
+
+        // Check vertical blockers for this y
+        for(scan_state& vline: vblock)
+        {
+            // Find next edge upwards if necessary.
+            while(
+                vline.start != vline.end &&
+                vline.start->pos + vline.start->length <= y
+            ) ++vline.start;
+
+            // Skip this line if already at the end or it's fully above.
+            if(
+                vline.start == vline.end ||
+                vline.start->pos >= top
+            ) continue;
+
+            blocked_y = std::max(
+                blocked_y, vline.start->pos + vline.start->length
+            );
+        }
+
+        // Check horizontal blockers for relevant range
+        hblock_y = std::max(hblock_y, y + 1);
+        while(hblock_y < top)
+        {
+            hstart = hup[hblock_y], hend = hup[hblock_y+1];
+            for(; hstart != hend; ++hstart)
+            {
+                if(
+                    hstart->pos + hstart->length > x && hstart->pos < x + w
+                ) blocked_y = std::max(blocked_y, hblock_y);
+            }
+            hstart = hdown[hblock_y], hend = hdown[hblock_y+1];
+            for(; hstart != hend; ++hstart)
+            {
+                if(
+                    hstart->pos + hstart->length > x && hstart->pos < x + w
+                ) blocked_y = std::max(blocked_y, hblock_y + 1);
+            }
+            ++hblock_y;
+        }
+
+        // If we ended up being blocked, jump beyond the blocker and retry.
+        if(blocked_y != y)
+        {
+            y = blocked_y;
+            continue;
+        }
+        else if(score > best_score)
+        {
+            best_score = score;
+            best_y = y;
+        }
+        y++;
+    }
+
+    return best_y;
 }
 
 void rect_packer::place_rect(unsigned x, unsigned y, unsigned w, unsigned h)

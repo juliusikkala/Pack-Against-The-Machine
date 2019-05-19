@@ -41,16 +41,6 @@ public:
     using iterator = std::vector<edge>::iterator;
     using const_iterator = std::vector<edge>::const_iterator;
 
-    int score(
-        unsigned x,
-        unsigned y,
-        unsigned w,
-        unsigned h,
-        bool move_direction,
-        bool scored_edge,
-        int& min_skip,
-        int& max_skip
-    ) const;
     void insert(unsigned line, const edge& e, line_map& mask);
 
     iterator operator[](unsigned line);
@@ -153,12 +143,12 @@ public:
 private:
     int find_max_score(unsigned w, unsigned h, unsigned& x, unsigned& y);
 
-    // 0 if can't be placed here. Otherwise, number of blocked edges.
-    // skip has two purposes. When calling, set it equal to 'vertical' of the
-    // edge the rect is tracking. 'skip' is set to the number of steps that must
-    // be moved towards the up or right direction until the result can be
-    // better.
-    int score_rect(unsigned x, unsigned y, unsigned w, unsigned h, int& skip);
+    // Returns new best y value or -1 if no better placing found.
+    int scan_rect(
+        unsigned x, unsigned max_y_top, unsigned w, unsigned h, int& score,
+        const line_map& vright, const line_map& vleft,
+        const line_map& hup, const line_map& hdown
+    );
     void place_rect(unsigned x, unsigned y, unsigned w, unsigned h);
 
     unsigned canvas_w, canvas_h;
